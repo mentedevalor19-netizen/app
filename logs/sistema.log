@@ -1,0 +1,6 @@
+[2026-04-10 23:52:49] [ADMIN_LOGIN_FALHOU] Tentativa falha: admin@admin.com IP=2804:5d20:610e:a301::99cb 
+[2026-04-10 23:53:15] [ADMIN_LOGIN_FALHOU] Tentativa falha: admin@admin.com IP=2804:5d20:610e:a301::99cb 
+[2026-04-10 23:53:47] [ADMIN_LOGIN] Admin #1 admin@admin.com logou 
+[2026-04-12 21:31:28] [ADMIN_LOGIN_FALHOU] Tentativa falha: fallen@gmail.com IP=2804:5d20:610e:a301::a3bd 
+[2026-04-12 21:31:36] [ADMIN_LOGIN_FALHOU] Tentativa falha: guinnsbru@gmail.com IP=2804:5d20:610e:a301::a3bd 
+[2026-04-12 21:31:49] [ADMIN_LOGIN] Admin #1 admin@admin.com logou 

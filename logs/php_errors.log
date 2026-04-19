@@ -1,0 +1,13 @@
+[12-Apr-2026 21:55:03 America/Sao_Paulo] PHP Fatal error:  Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 1052 Column 'status' in SELECT is ambiguous in /home/u604809831/domains/peru-pigeon-486053.hostingersite.com/public_html/files/pagamentos.php:54
+Stack trace:
+#0 /home/u604809831/domains/peru-pigeon-486053.hostingersite.com/public_html/files/pagamentos.php(54): PDO->prepare()
+#1 {main}
+  thrown in /home/u604809831/domains/peru-pigeon-486053.hostingersite.com/public_html/files/pagamentos.php on line 54
+[12-Apr-2026 21:58:21 America/Sao_Paulo] PHP Fatal error:  Uncaught Error: Call to undefined function runtime_webhook_secret() in /home/u604809831/domains/peru-pigeon-486053.hostingersite.com/public_html/setup_webhook.php:5
+Stack trace:
+#0 {main}
+  thrown in /home/u604809831/domains/peru-pigeon-486053.hostingersite.com/public_html/setup_webhook.php on line 5
+[12-Apr-2026 21:58:44 America/Sao_Paulo] PHP Fatal error:  Uncaught Error: Call to undefined function runtime_webhook_secret() in /home/u604809831/domains/peru-pigeon-486053.hostingersite.com/public_html/setup_webhook.php:5
+Stack trace:
+#0 {main}
+  thrown in /home/u604809831/domains/peru-pigeon-486053.hostingersite.com/public_html/setup_webhook.php on line 5

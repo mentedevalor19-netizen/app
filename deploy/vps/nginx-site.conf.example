@@ -1,0 +1,28 @@
+server {
+    listen 80;
+    server_name exemplo.com www.exemplo.com;
+    root /var/www/telegram-bot/current;
+    index index.php index.html;
+
+    client_max_body_size 20M;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~* /(config\.php|functions\.php|database\.sql|database_admin\.sql|database_update_funis\.sql)$ {
+        deny all;
+        return 403;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}

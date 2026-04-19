@@ -1,0 +1,94 @@
+x-app-build: &app-build
+  context: ../..
+  dockerfile: deploy/coolify/docker/php-apache/Dockerfile
+
+x-app-env: &app-env
+  TZ: ${APP_TIMEZONE:-America/Sao_Paulo}
+  APP_DEBUG: ${APP_DEBUG:-0}
+  SITE_URL: ${SITE_URL}
+  BASE_URL: ${BASE_URL}
+  DB_DRIVER: ${DB_DRIVER:-pgsql}
+  DB_DSN: ${DB_DSN:-}
+  DB_HOST: ${DB_HOST:-}
+  DB_PORT: ${DB_PORT:-5432}
+  DB_NAME: ${DB_NAME:-postgres}
+  DB_USER: ${DB_USER:-}
+  DB_PASS: ${DB_PASS:-}
+  DB_SCHEMA: ${DB_SCHEMA:-public}
+  DB_SSLMODE: ${DB_SSLMODE:-require}
+  DB_EMULATE_PREPARES: ${DB_EMULATE_PREPARES:-1}
+  ECOMPAG_CLIENT_ID: ${ECOMPAG_CLIENT_ID:-}
+  ECOMPAG_CLIENT_SECRET: ${ECOMPAG_CLIENT_SECRET:-}
+  WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_GROUP_ID: ${TELEGRAM_GROUP_ID:-}
+  DEFAULT_PRODUCT_NAME: ${DEFAULT_PRODUCT_NAME:-Acesso VIP - 30 dias}
+  DEFAULT_PRODUCT_DESCRIPTION: ${DEFAULT_PRODUCT_DESCRIPTION:-Acesso completo ao grupo por 30 dias}
+  DEFAULT_PRODUCT_PRICE: ${DEFAULT_PRODUCT_PRICE:-29.90}
+  DEFAULT_PRODUCT_DAYS: ${DEFAULT_PRODUCT_DAYS:-30}
+  ACCESS_LINK: ${ACCESS_LINK:-}
+  ACCESS_TOKEN_SALT: ${ACCESS_TOKEN_SALT:-}
+  EMAIL_FROM: ${EMAIL_FROM:-no-reply@seu-dominio.com}
+  EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Seu Projeto}
+  EMAIL_SUBJECT: ${EMAIL_SUBJECT:-Pagamento Confirmado - Acesso Liberado!}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-465}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+  N8N_SECRET: ${N8N_SECRET:-}
+  N8N_TIMEOUT: ${N8N_TIMEOUT:-15}
+
+services:
+  app:
+    build: *app-build
+    restart: unless-stopped
+    environment: *app-env
+    expose:
+      - "80"
+    volumes:
+      - app_logs:/var/www/html/logs
+      - app_payments:/var/www/html/payments
+
+  worker:
+    build: *app-build
+    restart: unless-stopped
+    command: >
+      /bin/sh -lc "while true; do
+      php /var/www/html/worker_runner.php all ${WORKER_LIMIT:-25};
+      php /var/www/html/cron_expiracao.php;
+      sleep ${WORKER_SLEEP:-60};
+      done"
+    environment: *app-env
+    volumes:
+      - app_logs:/var/www/html/logs
+      - app_payments:/var/www/html/payments
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:${N8N_IMAGE_TAG:-stable}
+    restart: unless-stopped
+    environment:
+      TZ: ${APP_TIMEZONE:-America/Sao_Paulo}
+      GENERIC_TIMEZONE: ${APP_TIMEZONE:-America/Sao_Paulo}
+      N8N_HOST: ${N8N_HOST}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-https}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL}
+      WEBHOOK_URL: ${N8N_PUBLIC_WEBHOOK_URL}
+      N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-1}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-true}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      NODE_ENV: production
+    expose:
+      - "5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  app_logs:
+  app_payments:
+  n8n_data:
