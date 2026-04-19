@@ -10,3 +10,5 @@ COPY deploy/coolify/docker/php-apache/allow-override.conf /etc/apache2/conf-avai
 RUN a2enconf allow-override
 
 WORKDIR /var/www/html
+
+COPY --chown=www-data:www-data . /var/www/html
