@@ -158,19 +158,7 @@ function processar_callback_telegram(array $callback): void
 
     if (strpos($data, 'orderbump:aceitar:') === 0) {
         $orderbumpId = (int) substr($data, 18);
-        $orderbump = get_orderbump_por_id($orderbumpId);
-        if (!$orderbump) {
-            enviar_mensagem($chatId, 'A oferta extra nao foi encontrada no momento.');
-            return;
-        }
-
-        $produtoPrincipalId = (int) ($orderbump['produto_principal_id'] ?? 0);
-        if ($produtoPrincipalId <= 0) {
-            enviar_mensagem($chatId, 'A oferta extra nao esta vinculada a um produto valido.');
-            return;
-        }
-
-        iniciar_compra($usuario, $produtoPrincipalId, $orderbumpId, true);
+        iniciar_compra_orderbump($usuario, $orderbumpId);
         return;
     }
 
@@ -260,14 +248,25 @@ function enviar_boas_vindas(array $usuario): void
 
     $audioUrl = runtime_start_audio_url();
     if ($audioUrl !== '') {
-        enviar_midia_telegram(
+        $audioCaption = render_template(message_template('msg_start_audio_caption'), [
+            'nome' => $nome,
+        ]);
+        $audioResponse = enviar_midia_telegram(
             $chatId,
             'audio',
             $audioUrl,
-            render_template(message_template('msg_start_audio_caption'), [
-                'nome' => $nome,
-            ])
+            $audioCaption
         );
+        if (!is_array($audioResponse) || empty($audioResponse['ok'])) {
+            log_evento('start_audio_falhou', 'Falha ao enviar o audio do /start.', [
+                'chat_id' => $chatId,
+                'audio_url' => $audioUrl,
+            ]);
+
+            if ($audioCaption !== '') {
+                enviar_mensagem($chatId, $audioCaption);
+            }
+        }
     }
 
     $botoes = [[
@@ -410,6 +409,92 @@ function iniciar_compra(array $usuario, int $produtoId, ?int $orderbumpId = null
 
     $pix = gerar_pix_para_usuario($usuario, $produtoCheckout, null, 'principal', $extras);
     if (!$pix) {
+        enviar_mensagem($chatId, message_template('msg_pix_error'));
+        return;
+    }
+
+    $mensagem = render_template(message_template('msg_pix_generated'), [
+        'produto' => htmlspecialchars((string) $produtoCheckout['nome']),
+        'valor' => formatar_valor((float) $pix['valor']),
+        'txid' => $pix['txid'],
+        'pix' => $pix['qr_code'],
+    ]);
+
+    enviar_mensagem($chatId, $mensagem);
+
+    if (!empty($pix['qr_img'])) {
+        enviar_qrcode_imagem($chatId, (string) $pix['qr_img']);
+    }
+}
+
+function iniciar_compra_orderbump(array $usuario, int $orderbumpId): void
+{
+    $chatId = (int) $usuario['telegram_id'];
+    $orderbump = get_orderbump_por_id($orderbumpId);
+
+    if (!$orderbump || !((int) ($orderbump['ativo'] ?? 1))) {
+        enviar_mensagem($chatId, 'A oferta extra nao esta disponivel no momento.');
+        return;
+    }
+
+    $produtoPrincipalId = (int) ($orderbump['produto_principal_id'] ?? 0);
+    $produtoPrincipal = get_produto_por_id($produtoPrincipalId);
+    if (!$produtoPrincipal || !((int) ($produtoPrincipal['ativo'] ?? 1))) {
+        log_evento('orderbump_checkout_sem_produto_principal', 'O order bump aceito esta sem produto principal valido.', [
+            'orderbump_id' => $orderbumpId,
+            'produto_principal_id' => $produtoPrincipalId,
+        ]);
+        enviar_mensagem($chatId, 'A oferta extra nao esta vinculada a um produto valido.');
+        return;
+    }
+
+    $produtoOferta = get_produto_oferta_orderbump($orderbump);
+    if (!$produtoOferta) {
+        log_evento('orderbump_checkout_sem_produto_oferta', 'O produto ofertado no order bump nao esta mais disponivel.', [
+            'orderbump_id' => $orderbumpId,
+            'produto_oferta_id' => (int) ($orderbump['produto_id'] ?? 0),
+        ]);
+        enviar_mensagem($chatId, 'A oferta extra nao esta disponivel no momento.');
+        return;
+    }
+
+    if (!runtime_checkout_uses_backend_payer()) {
+        enviar_mensagem($chatId, 'O CPF fixo do checkout ainda nao esta configurado. Acesse Configuracoes e preencha um CPF com 11 numeros para liberar o Pix direto.');
+        return;
+    }
+
+    if (trim(runtime_ecompag_client_id()) === '' || trim(runtime_ecompag_client_secret()) === '') {
+        enviar_mensagem($chatId, 'As credenciais da Ecompag ainda nao estao configuradas. Preencha o client ID e o client secret no painel antes de gerar o Pix.');
+        return;
+    }
+
+    $produtoCheckout = $produtoPrincipal;
+    $produtoCheckout['nome'] = trim((string) ($produtoPrincipal['nome'] ?? 'Produto') . ' + ' . (string) ($produtoOferta['nome'] ?? 'Oferta'));
+    $produtoCheckout['valor'] = round((float) ($produtoPrincipal['valor'] ?? 0) + (float) ($produtoOferta['valor'] ?? 0), 2);
+    $produtoCheckout['valor_original'] = round(
+        (float) ($produtoPrincipal['valor_original'] ?? $produtoPrincipal['valor'] ?? 0)
+        + (float) ($produtoOferta['valor_original'] ?? $produtoOferta['valor'] ?? 0),
+        2
+    );
+
+    enviar_mensagem(
+        $chatId,
+        render_template(message_template('msg_pix_generating'), [
+            'produto' => htmlspecialchars((string) $produtoCheckout['nome']),
+        ])
+    );
+
+    $pix = gerar_pix_para_usuario($usuario, $produtoCheckout, null, 'principal', [
+        'orderbump_id' => (int) $orderbump['id'],
+    ]);
+    if (!$pix) {
+        log_evento('orderbump_pix_geracao_falhou', 'Nao foi possivel gerar o Pix do order bump aceito.', [
+            'usuario_id' => (int) ($usuario['id'] ?? 0),
+            'orderbump_id' => (int) $orderbump['id'],
+            'produto_principal_id' => $produtoPrincipalId,
+            'produto_oferta_id' => (int) ($produtoOferta['id'] ?? 0),
+            'valor_total' => (float) ($produtoCheckout['valor'] ?? 0),
+        ]);
         enviar_mensagem($chatId, message_template('msg_pix_error'));
         return;
     }

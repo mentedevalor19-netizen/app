@@ -1864,28 +1864,165 @@ function normalizar_media_tipo(?string $tipo, bool $allowNone = true): string
     };
 }
 
-function enviar_midia_telegram(int $chatId, string $mediaTipo, string $mediaUrl, string $caption = '', array $extra = []): ?array
+function telegram_media_nome_arquivo(string $mediaUrl, string $fallback = 'arquivo'): string
+{
+    $mediaUrl = trim($mediaUrl);
+    if ($mediaUrl === '') {
+        return $fallback;
+    }
+
+    $filename = '';
+    $query = parse_url($mediaUrl, PHP_URL_QUERY);
+    if (is_string($query) && $query !== '') {
+        parse_str($query, $queryParams);
+        foreach (['n', 'filename', 'file', 'name'] as $key) {
+            $value = $queryParams[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                $filename = trim($value);
+                break;
+            }
+        }
+    }
+
+    if ($filename === '') {
+        $path = (string) parse_url($mediaUrl, PHP_URL_PATH);
+        $filename = basename($path);
+    }
+
+    $filename = trim($filename);
+    return $filename !== '' ? $filename : $fallback;
+}
+
+function telegram_media_tipo_resolvido(string $mediaTipo, string $mediaUrl = ''): string
 {
     $mediaTipo = normalizar_media_tipo($mediaTipo);
+    if ($mediaTipo !== 'audio') {
+        return $mediaTipo;
+    }
+
+    $filename = strtolower(telegram_media_nome_arquivo($mediaUrl, 'audio'));
+    if (str_contains($filename, '.ogg') || str_contains($filename, '.oga') || str_contains($filename, 'voice_')) {
+        return 'voice';
+    }
+
+    return 'audio';
+}
+
+function telegram_media_metodo_campo(string $mediaTipo): array
+{
+    return match ($mediaTipo) {
+        'video' => ['sendVideo', 'video'],
+        'audio' => ['sendAudio', 'audio'],
+        'voice' => ['sendVoice', 'voice'],
+        'document' => ['sendDocument', 'document'],
+        default => ['sendPhoto', 'photo'],
+    };
+}
+
+function telegram_request_multipart(string $method, array $params = []): ?array
+{
+    if (runtime_telegram_bot_token() === 'SEU_TOKEN_DO_BOT') {
+        log_evento('telegram_config', 'Token do bot ainda não configurado.');
+        return null;
+    }
+
+    $ch = curl_init(runtime_telegram_api() . '/' . $method);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $params,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 60,
+        CURLOPT_SSL_VERIFYPEER => true,
+    ]);
+
+    $response = curl_exec($ch);
+    $error = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($error) {
+        log_evento('telegram_curl_error', $error, ['method' => $method, 'multipart' => true]);
+        return null;
+    }
+
+    $decoded = json_decode((string) $response, true);
+    if ($httpCode >= 400 || !is_array($decoded)) {
+        log_evento('telegram_http_error', 'Falha na API do Telegram', [
+            'method' => $method,
+            'http_code' => $httpCode,
+            'response' => $response,
+            'multipart' => true,
+        ]);
+        return null;
+    }
+
+    return $decoded;
+}
+
+function baixar_arquivo_temporario(string $url, string $prefix = 'tg_'): ?array
+{
+    if (filter_var($url, FILTER_VALIDATE_URL) === false) {
+        return null;
+    }
+
+    $tmpPath = tempnam(sys_get_temp_dir(), $prefix);
+    if ($tmpPath === false) {
+        return null;
+    }
+
+    $handle = fopen($tmpPath, 'wb');
+    if ($handle === false) {
+        @unlink($tmpPath);
+        return null;
+    }
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_FILE => $handle,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS => 5,
+        CURLOPT_CONNECTTIMEOUT => 15,
+        CURLOPT_TIMEOUT => 60,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_USERAGENT => 'Mozilla/5.0 Codex Telegram Media Relay',
+    ]);
+
+    $ok = curl_exec($ch);
+    $error = curl_error($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $contentType = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+    $effectiveUrl = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+    curl_close($ch);
+    fclose($handle);
+
+    if ($ok === false || $error !== '' || $httpCode >= 400 || filesize($tmpPath) === 0) {
+        log_evento('download_midia_falhou', 'Nao foi possivel baixar a midia remota para reenviar ao Telegram.', [
+            'url' => $url,
+            'http_code' => $httpCode,
+            'erro' => $error,
+        ]);
+        @unlink($tmpPath);
+        return null;
+    }
+
+    $filename = telegram_media_nome_arquivo($effectiveUrl !== '' ? $effectiveUrl : $url, 'arquivo');
+    return [
+        'path' => $tmpPath,
+        'filename' => $filename,
+        'content_type' => $contentType !== '' ? $contentType : 'application/octet-stream',
+    ];
+}
+
+function enviar_midia_telegram(int $chatId, string $mediaTipo, string $mediaUrl, string $caption = '', array $extra = []): ?array
+{
+    $mediaTipo = telegram_media_tipo_resolvido($mediaTipo, $mediaUrl);
     $mediaUrl = trim($mediaUrl);
 
     if ($mediaTipo === 'none' || $mediaUrl === '') {
         return enviar_mensagem($chatId, $caption, $extra);
     }
 
-    $method = match ($mediaTipo) {
-        'video' => 'sendVideo',
-        'audio' => 'sendAudio',
-        'document' => 'sendDocument',
-        default => 'sendPhoto',
-    };
-
-    $mediaField = match ($mediaTipo) {
-        'video' => 'video',
-        'audio' => 'audio',
-        'document' => 'document',
-        default => 'photo',
-    };
+    [$method, $mediaField] = telegram_media_metodo_campo($mediaTipo);
 
     $payload = array_merge([
         'chat_id' => $chatId,
@@ -1894,7 +2031,27 @@ function enviar_midia_telegram(int $chatId, string $mediaTipo, string $mediaUrl,
         'parse_mode' => 'HTML',
     ], $extra);
 
-    return telegram_request($method, $payload);
+    $response = telegram_request($method, $payload);
+    if (is_array($response) && !empty($response['ok'])) {
+        return $response;
+    }
+
+    $download = baixar_arquivo_temporario($mediaUrl, 'tgm_');
+    if (!$download) {
+        return $response;
+    }
+
+    try {
+        $payload[$mediaField] = new CURLFile(
+            $download['path'],
+            (string) $download['content_type'],
+            (string) $download['filename']
+        );
+
+        return telegram_request_multipart($method, $payload);
+    } finally {
+        @unlink($download['path']);
+    }
 }
 
 function enviar_conteudo_telegram(int $chatId, string $texto, ?string $mediaTipo = 'none', ?string $mediaUrl = '', array $extra = []): ?array
@@ -2436,17 +2593,15 @@ function enviar_oferta_orderbump(int $chatId, array $orderbump, array $vars = []
     $desconto = orderbump_desconto_percentual($orderbump);
     $mensagemOferta = trim((string) ($orderbump['mensagem'] ?? ''));
     if ($mensagemOferta === '') {
-        $mensagemOferta = 'Adicione tambem <b>{produto}</b> por <b>{valor}</b>.';
+        $mensagemOferta = "<b>Oferta extra liberada</b>\n\nAdicione tambem <b>{produto}</b> por <b>{valor}</b>.";
     }
 
-    $mensagem = render_template(message_template('msg_orderbump_offer'), [
-        'mensagem' => render_template($mensagemOferta, array_merge([
-            'produto' => htmlspecialchars($produtoNome, ENT_QUOTES, 'UTF-8'),
-            'valor' => formatar_valor($produtoValor),
-            'valor_original' => formatar_valor($produtoValorOriginal),
-            'desconto' => number_format($desconto, 0, ',', '.'),
-        ], $vars)),
-    ]);
+    $mensagem = render_template($mensagemOferta, array_merge([
+        'produto' => htmlspecialchars($produtoNome, ENT_QUOTES, 'UTF-8'),
+        'valor' => formatar_valor($produtoValor),
+        'valor_original' => formatar_valor($produtoValorOriginal),
+        'desconto' => number_format($desconto, 0, ',', '.'),
+    ], $vars));
 
     $extra = [
         'reply_markup' => json_encode([
@@ -2889,7 +3044,15 @@ function gerar_pix_para_usuario(array $usuario, array $produto, ?int $funilId = 
 
     $data = $response['data'] ?? [];
     if (!$response['ok'] || empty($data['qrcode']) || empty($data['transactionId'])) {
-        log_evento('pix_geracao_falhou', 'Não foi possível gerar QR Code', ['response' => $data]);
+        log_evento('pix_geracao_falhou', 'Não foi possível gerar QR Code', [
+            'response' => $data,
+            'usuario_id' => (int) ($usuario['id'] ?? 0),
+            'produto_id' => isset($produto['id']) ? (int) $produto['id'] : null,
+            'produto_nome' => (string) ($produto['nome'] ?? ''),
+            'valor' => (float) ($produto['valor'] ?? 0),
+            'tipo_oferta' => $tipoOferta,
+            'extras' => $extras,
+        ]);
         return null;
     }
 
