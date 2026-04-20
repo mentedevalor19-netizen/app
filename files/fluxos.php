@@ -85,11 +85,6 @@ $fields = [
         'help' => 'Mensagem que embrulha a oferta de upsell enviada pelo funil. Pode usar {mensagem}.',
         'rows' => 5,
     ],
-    'msg_orderbump_offer' => [
-        'label' => 'Mensagem base de order bump',
-        'help' => 'Mensagem que embrulha a oferta do order bump enviada no checkout. Pode usar {mensagem}.',
-        'rows' => 5,
-    ],
     'msg_orderbump_delivered' => [
         'label' => 'Mensagem de entrega do order bump',
         'help' => 'Mensagem enviada depois da compra do order bump. Pode usar {conteudo}.',
@@ -184,7 +179,7 @@ include '_layout.php';
       <div>
         <p class="card-kicker">Fluxo unico</p>
         <h2 class="card-title">Roteiro do bot</h2>
-        <p class="card-copy">Aqui fica o caminho principal: mensagem inicial com botao de planos, escolha do plano, Pix direto e os textos de entrega. O upsell visual fica em <b>Funis / Upsell</b> e o order bump em <b>Order Bump</b>.</p>
+        <p class="card-copy">Aqui fica o caminho principal: mensagem inicial com botao de planos, escolha do plano, Pix direto e os textos de entrega. O upsell visual fica em <b>Funis / Upsell</b> e a mensagem real do order bump fica em <b>Order Bump</b>.</p>
       </div>
       <div class="actions">
         <a href="<?= admin_url('funis.php') ?>" class="btn btn-ghost btn-sm">Abrir upsell</a>
@@ -215,7 +210,7 @@ include '_layout.php';
           <div class="journey-step-index">02</div>
           <div class="journey-step-body">
             <h3 class="journey-step-title">Audio separado</h3>
-            <p class="journey-step-copy">Depois da primeira midia, o bot pode enviar um audio separado para aquecer o lead.</p>
+            <p class="journey-step-copy">Depois da primeira midia, o bot pode enviar um audio separado para aquecer o lead. Links .ogg e links com redirecionamento agora tem fallback automatico.</p>
           </div>
         </article>
 
@@ -236,7 +231,7 @@ include '_layout.php';
         </article>
       </div>
 
-      <div class="alert alert-info" style="margin-top: 20px;">Se precisar trocar o CPF interno do checkout, use a area de <b>Configuracoes</b>. Este painel de fluxo ficou so para o roteiro principal.</div>
+      <div class="alert alert-info" style="margin-top: 20px;">Se precisar trocar o CPF interno do checkout, use a area de <b>Configuracoes</b>. Este painel de fluxo ficou so para o roteiro principal. A mensagem do order bump agora e configurada apenas na propria tela de <b>Order Bump</b>.</div>
     </div>
   </section>
 

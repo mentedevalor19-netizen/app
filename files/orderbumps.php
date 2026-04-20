@@ -260,7 +260,7 @@ include '_layout.php';
     <div class="card-header">
       <div>
         <h2 class="card-title"><?= $form['id'] > 0 ? 'Editar order bump' : 'Novo order bump' ?></h2>
-        <p class="card-copy">Escolha o plano principal, o produto do order bump, o desconto e a midia da oferta. Se o cliente aceitar, o bot soma tudo antes de gerar o Pix.</p>
+        <p class="card-copy">Escolha o plano principal, o produto do order bump, o desconto e a midia da oferta. Se o cliente aceitar, o bot soma tudo antes de gerar o Pix. A mensagem configurada aqui e a mensagem real que o lead recebe.</p>
       </div>
       <?php if ($form['id'] > 0): ?>
         <a href="<?= admin_url('orderbumps.php') ?>" class="btn btn-ghost btn-sm">Cancelar edicao</a>
@@ -339,7 +339,7 @@ include '_layout.php';
         <div class="form-group">
           <label class="form-label" for="mensagem">Mensagem do order bump</label>
           <textarea class="form-control" id="mensagem" name="mensagem" rows="5" placeholder="Ex: Adicione tambem {produto} por {valor}."><?= htmlspecialchars((string) $form['mensagem']) ?></textarea>
-          <span class="form-help">Use {produto}, {valor}, {valor_original} e {desconto}.</span>
+          <span class="form-help">Use {produto}, {valor}, {valor_original}, {desconto} e {produto_principal}. Nao existe mais um segundo campo dessa mensagem em Fluxo/start.</span>
         </div>
 
         <?php if ($hasWebhookColumns): ?>
