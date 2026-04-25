@@ -24,8 +24,8 @@ Preencha em `config.php` ou com variaveis de ambiente:
 - `DB_NAME`
 - `DB_USER`
 - `DB_PASS`
-- `ECOMPAG_CLIENT_ID`
-- `ECOMPAG_CLIENT_SECRET`
+- `PESTOPAY_PUBLIC_KEY`
+- `PESTOPAY_SECRET_KEY`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_GROUP_ID`
 - `WEBHOOK_SECRET`
@@ -34,7 +34,7 @@ Preencha em `config.php` ou com variaveis de ambiente:
 - `SMTP_USER`
 - `SMTP_PASSWORD`
 
-Depois do primeiro login no admin, voce pode ajustar Telegram, Ecompag, URLs, SMTP, Meta e segredo do webhook pela tela `Configuracoes`.
+Depois do primeiro login no admin, voce pode ajustar Telegram, PestoPay, URLs, SMTP, Meta e segredo do webhook pela tela `Configuracoes`.
 
 ## Telegram
 
@@ -46,7 +46,7 @@ Depois do primeiro login no admin, voce pode ajustar Telegram, Ecompag, URLs, SM
 ## Webhooks
 
 - Telegram: `https://seu-dominio.com/setup_webhook.php?token=SUA_CHAVE`
-- Ecompag notificacao: `https://seu-dominio.com/webhook_pix.php?token=SUA_CHAVE`
+- PestoPay notificacao: `https://seu-dominio.com/webhook_pix.php?token=SUA_CHAVE`
 
 ## Cron
 
@@ -86,7 +86,7 @@ Troque a senha imediatamente apos o primeiro acesso.
 2. Importe o banco.
 3. Configure apenas banco e uma base minima no `config.php`.
 4. Entre no painel.
-5. Abra `Configuracoes` e salve token do bot, group id, Ecompag e webhook secret.
+5. Abra `Configuracoes` e salve token do bot, group id, PestoPay e webhook secret.
 6. Ajuste as mensagens do fluxo, cadastre produtos, funis, downsells e fluxos no painel, e sincronize os comandos personalizados do bot se usar gatilho por comando.
 7. Rode `setup_webhook.php` com o token salvo.
-8. Configure o webhook da Ecompag e os workers.
+8. Configure o webhook da PestoPay e os workers.

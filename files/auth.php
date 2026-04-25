@@ -32,6 +32,11 @@ function auth_login(string $email, string $senha): ?array {
         return null;
     }
 
+    if (tenants_enabled() && (int) ($admin['tenant_id'] ?? 0) <= 0) {
+        log_evento('admin_login_sem_tenant', "Admin sem tenant vinculado: $email");
+        return null;
+    }
+
     // Cria token de sessão
     $token    = bin2hex(random_bytes(32));
     $expira   = date('Y-m-d H:i:s', time() + SESSION_DURATION);
@@ -61,6 +66,7 @@ function auth_login(string $email, string $senha): ?array {
         'samesite' => 'Lax',
     ]);
 
+    bootstrap_tenant_from_admin($admin);
     log_evento('admin_login', "Admin #{$admin['id']} {$admin['email']} logou");
     return $admin;
 }
@@ -83,11 +89,16 @@ function auth_admin(): ?array {
 
     if (!$admin) return null;
 
+    if (tenants_enabled() && (int) ($admin['tenant_id'] ?? 0) <= 0) {
+        return null;
+    }
+
     // Renova expiração a cada request (sliding session)
     $nova_expiracao = date('Y-m-d H:i:s', time() + SESSION_DURATION);
     db()->prepare('UPDATE sessoes_admin SET expira_em = ? WHERE token = ?')
         ->execute([$nova_expiracao, $token]);
 
+    bootstrap_tenant_from_admin($admin);
     return $admin;
 }
 
@@ -100,6 +111,7 @@ function auth_logout(): void {
         db()->prepare('DELETE FROM sessoes_admin WHERE token = ?')->execute([$token]);
     }
     setcookie(ADMIN_COOKIE, '', ['expires' => time() - 3600, 'path' => ADMIN_BASE_URI]);
+    set_current_tenant_context(null);
 }
 
 /**

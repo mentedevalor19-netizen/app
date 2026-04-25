@@ -271,6 +271,12 @@ textarea {
   text-transform: uppercase;
 }
 
+.tenant-chip {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .logout-link {
   display: inline-flex;
   align-items: center;
@@ -1123,6 +1129,9 @@ details summary {
         <div>
           <p class="admin-name"><?= htmlspecialchars((string) ($current_admin['nome'] ?? 'Administrador')) ?></p>
           <p class="admin-role"><?= htmlspecialchars((string) ($current_admin['nivel'] ?? 'admin')) ?></p>
+          <?php if (current_tenant_name() !== ''): ?>
+            <p class="tenant-chip"><?= htmlspecialchars(current_tenant_name()) ?></p>
+          <?php endif; ?>
         </div>
       </div>
       <a href="<?= admin_url('logout.php') ?>" class="logout-link">Sair do painel</a>

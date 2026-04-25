@@ -13,7 +13,7 @@ $pagina = max(1, (int) ($_GET['p'] ?? 1));
 $porPagina = 50;
 $offset = ($pagina - 1) * $porPagina;
 
-$where = ['1=1'];
+$where = ['1=1', tenant_scope_condition('logs')];
 $params = [];
 
 if ($filtroTipo !== '') {
@@ -37,7 +37,7 @@ $stmt = $pdo->prepare("SELECT * FROM logs WHERE $whereSql ORDER BY created_at DE
 $stmt->execute($params);
 $logs = $stmt->fetchAll();
 
-$tipos = $pdo->query('SELECT DISTINCT tipo FROM logs ORDER BY tipo')->fetchAll(PDO::FETCH_COLUMN);
+$tipos = $pdo->query('SELECT DISTINCT tipo FROM logs WHERE ' . tenant_scope_condition('logs') . ' ORDER BY tipo')->fetchAll(PDO::FETCH_COLUMN);
 
 $page_title = 'Logs';
 $page_subtitle = $totalRows . ' evento(s) encontrado(s)';

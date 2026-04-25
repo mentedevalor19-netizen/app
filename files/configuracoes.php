@@ -27,8 +27,9 @@ $integrationFields = [
     'telegram_group_id' => ['label' => 'Telegram group ID', 'type' => 'text', 'placeholder' => '-1001234567890'],
     'checkout_fixed_name' => ['label' => 'Nome fixo do pagador', 'type' => 'text', 'placeholder' => 'Nome usado no checkout'],
     'checkout_fixed_cpf' => ['label' => 'CPF fixo do checkout', 'type' => 'text', 'placeholder' => '12345678901'],
-    'ecompag_client_id' => ['label' => 'Ecompag client ID', 'type' => 'text', 'placeholder' => 'seu_client_id'],
-    'ecompag_client_secret' => ['label' => 'Ecompag client secret', 'type' => 'text', 'placeholder' => 'seu_client_secret'],
+    'pestopay_public_key' => ['label' => 'PestoPay public key', 'type' => 'text', 'placeholder' => 'sua_public_key'],
+    'pestopay_secret_key' => ['label' => 'PestoPay secret key', 'type' => 'text', 'placeholder' => 'sua_secret_key'],
+    'pestopay_webhook_token' => ['label' => 'PestoPay webhook token', 'type' => 'text', 'placeholder' => 'token retornado pela API'],
     'n8n_webhook_url' => ['label' => 'n8n webhook URL', 'type' => 'text', 'placeholder' => 'https://n8n.seudominio.com/webhook/seu-endpoint'],
     'n8n_secret' => ['label' => 'n8n secret', 'type' => 'password', 'placeholder' => 'segredo-compartilhado'],
     'n8n_timeout' => ['label' => 'n8n timeout (segundos)', 'type' => 'number', 'step' => '1', 'placeholder' => '15'],
@@ -66,8 +67,9 @@ $values = [
     'telegram_group_id' => app_setting('telegram_group_id', TELEGRAM_GROUP_ID),
     'checkout_fixed_name' => app_setting('checkout_fixed_name', ''),
     'checkout_fixed_cpf' => app_setting('checkout_fixed_cpf', ''),
-    'ecompag_client_id' => app_setting('ecompag_client_id', ECOMPAG_CLIENT_ID),
-    'ecompag_client_secret' => app_setting('ecompag_client_secret', ECOMPAG_CLIENT_SECRET),
+    'pestopay_public_key' => app_setting('pestopay_public_key', app_setting('ecompag_client_id', PESTOPAY_PUBLIC_KEY)),
+    'pestopay_secret_key' => app_setting('pestopay_secret_key', app_setting('ecompag_client_secret', PESTOPAY_SECRET_KEY)),
+    'pestopay_webhook_token' => app_setting('pestopay_webhook_token', ''),
     'n8n_webhook_url' => app_setting('n8n_webhook_url', N8N_WEBHOOK_URL),
     'n8n_secret' => app_setting('n8n_secret', N8N_SECRET),
     'n8n_timeout' => app_setting('n8n_timeout', (string) N8N_TIMEOUT),
@@ -87,7 +89,7 @@ $values = [
 ];
 
 $page_title = 'Configuracoes';
-$page_subtitle = 'Integre Telegram, Ecompag, n8n e checkout sem editar arquivos';
+$page_subtitle = 'Integre Telegram, PestoPay, n8n e checkout sem editar arquivos';
 $active_menu = 'configuracoes';
 include '_layout.php';
 ?>
@@ -155,8 +157,8 @@ include '_layout.php';
           <div class="alert alert-warning">O CPF fixo do checkout ainda nao esta pronto. Preencha um CPF com 11 numeros para o Pix gerar sem pedir CPF ao cliente.</div>
         <?php endif; ?>
 
-        <?php if (trim((string) $values['ecompag_client_id']) === '' || trim((string) $values['ecompag_client_secret']) === ''): ?>
-          <div class="alert alert-warning">As credenciais da Ecompag ainda nao estao prontas. Preencha o client ID e o client secret antes de testar o Pix.</div>
+        <?php if (trim((string) $values['pestopay_public_key']) === '' || trim((string) $values['pestopay_secret_key']) === ''): ?>
+          <div class="alert alert-warning">As credenciais da PestoPay ainda nao estao prontas. Preencha a public key e a secret key antes de testar o Pix.</div>
         <?php endif; ?>
 
         <div class="form-group">
@@ -165,7 +167,7 @@ include '_layout.php';
         </div>
 
         <div class="form-grid">
-          <?php foreach (['ecompag_client_id', 'ecompag_client_secret'] as $field): ?>
+        <?php foreach (['pestopay_public_key', 'pestopay_secret_key', 'pestopay_webhook_token'] as $field): ?>
             <div class="form-group">
               <label class="form-label" for="<?= htmlspecialchars($field) ?>"><?= htmlspecialchars($integrationFields[$field]['label']) ?></label>
               <input
@@ -318,15 +320,15 @@ include '_layout.php';
         </div>
         <div>
           <div class="form-label">Setup do webhook</div>
-          <div class="code-box"><?= htmlspecialchars(runtime_base_url() . '/setup_webhook.php?token=' . runtime_webhook_secret()) ?></div>
+        <div class="code-box"><?= htmlspecialchars(url_with_query_params(runtime_base_url() . '/setup_webhook.php', tenant_public_query_params(true))) ?></div>
         </div>
         <div>
-          <div class="form-label">Webhook Pix</div>
+          <div class="form-label">Webhook PestoPay</div>
           <div class="code-box"><?= htmlspecialchars(runtime_ecompag_notify_url()) ?></div>
         </div>
         <div>
           <div class="form-label">Cron por URL</div>
-          <div class="code-box"><?= htmlspecialchars(runtime_base_url() . '/cron_expiracao.php?token=' . runtime_webhook_secret()) ?></div>
+        <div class="code-box"><?= htmlspecialchars(url_with_query_params(runtime_base_url() . '/cron_expiracao.php', tenant_public_query_params(true))) ?></div>
         </div>
       </div>
     </article>

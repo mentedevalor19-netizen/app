@@ -9,12 +9,13 @@ $pdo = db();
 $msg = null;
 $temCpf = db_has_column('usuarios', 'cpf');
 $canManageUsers = ($current_admin['nivel'] ?? '') !== 'viewer';
+$usuarioScope = tenant_scope_condition('usuarios');
 
 $usuarioAtivar = null;
 $ativarId = (int) ($_GET['ativar'] ?? 0);
 
 if ($ativarId > 0) {
-    $stmt = $pdo->prepare('SELECT * FROM usuarios WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM usuarios WHERE id = ? AND ' . $usuarioScope . ' LIMIT 1');
     $stmt->execute([$ativarId]);
     $usuarioAtivar = $stmt->fetch();
 
@@ -29,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = (string) ($_POST['acao'] ?? '');
     $usuarioId = (int) ($_POST['usuario_id'] ?? 0);
 
-    $stmt = $pdo->prepare('SELECT * FROM usuarios WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM usuarios WHERE id = ? AND ' . $usuarioScope . ' LIMIT 1');
     $stmt->execute([$usuarioId]);
     $usuario = $stmt->fetch();
 
@@ -40,11 +41,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $dias = max(1, (int) ($_POST['dias'] ?? DIAS_ACESSO));
             $expiraEm = date('Y-m-d H:i:s', strtotime('+' . $dias . ' days'));
 
-            $pdo->prepare("UPDATE usuarios SET status = 'ativo', data_expiracao = ? WHERE id = ?")->execute([$expiraEm, $usuarioId]);
+            $pdo->prepare("UPDATE usuarios SET status = 'ativo', data_expiracao = ? WHERE id = ? AND " . $usuarioScope)->execute([$expiraEm, $usuarioId]);
 
             $link = gerar_link_convite();
             if ($link) {
-                $pdo->prepare('UPDATE usuarios SET grupo_adicionado = 1 WHERE id = ?')->execute([$usuarioId]);
+                $pdo->prepare('UPDATE usuarios SET grupo_adicionado = 1 WHERE id = ? AND ' . $usuarioScope)->execute([$usuarioId]);
                 enviar_mensagem(
                     (int) $usuario['telegram_id'],
                     render_template(message_template('msg_manual_activation'), [
@@ -70,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($acao === 'excluir') {
             remover_do_grupo((int) $usuario['telegram_id']);
-            $pdo->prepare('DELETE FROM usuarios WHERE id = ?')->execute([$usuarioId]);
+            $pdo->prepare('DELETE FROM usuarios WHERE id = ? AND ' . $usuarioScope)->execute([$usuarioId]);
             log_evento('admin_excluir', "Admin #{$current_admin['id']} excluiu usuario #{$usuarioId}");
             header('Location: ' . admin_url('usuarios.php?ok=excluido'));
             exit;
@@ -86,6 +87,7 @@ $offset = ($pagina - 1) * $porPagina;
 
 $where = [];
 $params = [];
+$where[] = $usuarioScope;
 
 if ($filtroStatus !== '') {
     $where[] = 'status = ?';

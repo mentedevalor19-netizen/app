@@ -36,6 +36,9 @@ $hasWebhookColumns = db_has_column('orderbumps', 'webhook_url') && db_has_column
 $pdo = db();
 $editingId = (int) ($_GET['editar'] ?? 0);
 $msg = null;
+$orderbumpScope = tenant_scope_condition('orderbumps');
+$produtoScope = tenant_scope_condition('produtos');
+$pagamentoScope = tenant_scope_condition('pagamentos');
 
 $form = [
     'id' => 0,
@@ -53,7 +56,7 @@ $form = [
 ];
 
 if ($editingId > 0) {
-    $stmt = $pdo->prepare('SELECT * FROM orderbumps WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM orderbumps WHERE id = ? AND ' . $orderbumpScope . ' LIMIT 1');
     $stmt->execute([$editingId]);
     $editing = $stmt->fetch();
 
@@ -108,6 +111,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['tipo' => 'danger', 'texto' => 'Selecione o produto ofertado no order bump.'];
         } elseif ($form['produto_id'] === $form['produto_principal_id']) {
             $msg = ['tipo' => 'danger', 'texto' => 'O produto principal e o produto do order bump precisam ser diferentes.'];
+        } elseif (!get_produto_por_id($form['produto_principal_id']) || !get_produto_por_id($form['produto_id'])) {
+            $msg = ['tipo' => 'danger', 'texto' => 'Os produtos escolhidos precisam pertencer ao workspace atual.'];
         } elseif ($form['media_tipo'] !== 'none' && $form['media_url'] === '') {
             $msg = ['tipo' => 'danger', 'texto' => 'Se escolher uma midia para o order bump, informe a URL publica dela.'];
         } elseif ($form['media_tipo'] !== 'none' && filter_var($form['media_url'], FILTER_VALIDATE_URL) === false) {
@@ -140,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $params[] = $webhookSecret;
                 }
 
-                $sql .= ', ativo = ?, ordem = ? WHERE id = ?';
+                $sql .= ', ativo = ?, ordem = ? WHERE id = ? AND ' . $orderbumpScope;
                 $params[] = $form['ativo'];
                 $params[] = $form['ordem'];
                 $params[] = $form['id'];
@@ -178,10 +183,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $params[] = $form['ativo'];
                 $params[] = $form['ordem'];
 
-                $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+                $placeholderList = array_fill(0, count($columns), '?');
+                tenant_insert_append('orderbumps', $columns, $placeholderList, $params);
                 $pdo->prepare(
                     'INSERT INTO orderbumps (' . implode(', ', $columns) . ')
-                     VALUES (' . $placeholders . ')'
+                     VALUES (' . implode(', ', $placeholderList) . ')'
                 )->execute($params);
             }
 
@@ -195,7 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ativo = (int) ($_POST['ativo'] ?? 0);
 
         if ($id > 0) {
-            $pdo->prepare('UPDATE orderbumps SET ativo = ? WHERE id = ?')->execute([$ativo ? 0 : 1, $id]);
+            $pdo->prepare('UPDATE orderbumps SET ativo = ? WHERE id = ? AND ' . $orderbumpScope)->execute([$ativo ? 0 : 1, $id]);
             header('Location: ' . admin_url('orderbumps.php?ok=salvo'));
             exit;
         }
@@ -206,7 +212,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $emUso = 0;
 
         if (db_has_table('pagamentos') && db_has_column('pagamentos', 'orderbump_id')) {
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM pagamentos WHERE orderbump_id = ?');
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM pagamentos WHERE orderbump_id = ? AND ' . $pagamentoScope);
             $stmt->execute([$id]);
             $emUso += (int) $stmt->fetchColumn();
         }
@@ -214,14 +220,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($emUso > 0) {
             $msg = ['tipo' => 'warning', 'texto' => 'Esse order bump possui pagamentos vinculados. Desative em vez de excluir.'];
         } else {
-            $pdo->prepare('DELETE FROM orderbumps WHERE id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM orderbumps WHERE id = ? AND ' . $orderbumpScope)->execute([$id]);
             header('Location: ' . admin_url('orderbumps.php?ok=excluido'));
             exit;
         }
     }
 }
 
-$produtos = $pdo->query('SELECT * FROM produtos ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtos = $pdo->query('SELECT * FROM produtos WHERE ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
 $hasTipoProduto = db_has_column('produtos', 'tipo');
 $hasPackLink = db_has_column('produtos', 'pack_link');
 $orderbumps = $pdo->query(
@@ -232,8 +238,9 @@ $orderbumps = $pdo->query(
             ($hasTipoProduto ? ', pb.tipo AS produto_tipo' : ", 'grupo' AS produto_tipo") . ',
             ' . ($hasPackLink ? 'pb.pack_link' : 'NULL') . ' AS produto_pack_link
      FROM orderbumps o
-     LEFT JOIN produtos pm ON pm.id = o.produto_principal_id
-     LEFT JOIN produtos pb ON pb.id = o.produto_id
+     LEFT JOIN produtos pm ON pm.id = o.produto_principal_id AND ' . $produtoScope . '
+     LEFT JOIN produtos pb ON pb.id = o.produto_id AND ' . $produtoScope . '
+     WHERE ' . $orderbumpScope . '
      ORDER BY ' . db_order_by_clause('orderbumps', 'o')
 )->fetchAll();
 

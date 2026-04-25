@@ -2,7 +2,12 @@
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/functions.php';
 
-$token = $_GET['token'] ?? '';
+$tenant = bootstrap_tenant_from_request();
+if (tenants_enabled() && !$tenant) {
+    http_response_code(400);
+    exit('Tenant nao informado.');
+}
+
 if (!request_has_valid_webhook_token()) {
     http_response_code(403);
     exit('Acesso negado.');

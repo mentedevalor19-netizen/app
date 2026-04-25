@@ -2,12 +2,17 @@
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/functions.php';
 
+$tenant = bootstrap_tenant_from_request();
+if (tenants_enabled() && !$tenant) {
+    http_response_code(200);
+    exit('OK');
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     exit('Method Not Allowed');
 }
 
-$token = $_GET['token'] ?? '';
 if (!request_has_valid_webhook_token()) {
     log_evento('webhook_pix_secret_invalido', 'Tentativa de webhook com token invalido.');
     http_response_code(200);
@@ -27,16 +32,44 @@ if (!is_array($payload)) {
     exit('OK');
 }
 
-log_evento('webhook_pix_recebido', 'Webhook Ecompag recebido', $payload);
+log_evento('webhook_pix_recebido', 'Webhook PestoPay recebido', $payload);
 
-if (($payload['transactionType'] ?? '') !== 'RECEIVEPIX' || ($payload['status'] ?? '') !== 'PAID') {
-    http_response_code(200);
-    exit('OK');
+$event = strtoupper(trim((string) ($payload['event'] ?? '')));
+$pestopayToken = trim((string) ($payload['token'] ?? ''));
+$transaction = is_array($payload['transaction'] ?? null) ? $payload['transaction'] : [];
+$pixInformation = is_array($transaction['pixInformation'] ?? null) ? $transaction['pixInformation'] : [];
+
+if ($event !== '') {
+    $storedWebhookToken = runtime_pestopay_webhook_token();
+    if ($storedWebhookToken !== '' && $pestopayToken !== '' && !hash_equals($storedWebhookToken, $pestopayToken)) {
+        log_evento('webhook_pix_token_invalido', 'Token do webhook da PestoPay nao confere.', [
+            'event' => $event,
+        ]);
+        http_response_code(200);
+        exit('OK');
+    }
+
+    $paymentMethod = strtoupper(trim((string) ($transaction['paymentMethod'] ?? '')));
+    $status = strtoupper(trim((string) ($transaction['status'] ?? '')));
+    if ($event !== 'TRANSACTION_PAID' || ($paymentMethod !== '' && $paymentMethod !== 'PIX') || ($status !== '' && !in_array($status, ['COMPLETED', 'PAID'], true))) {
+        http_response_code(200);
+        exit('OK');
+    }
+} else {
+    if (($payload['transactionType'] ?? '') !== 'RECEIVEPIX' || ($payload['status'] ?? '') !== 'PAID') {
+        http_response_code(200);
+        exit('OK');
+    }
 }
 
-$txid = (string) ($payload['transactionId'] ?? '');
+$txid = trim((string) (
+    $payload['transactionId']
+    ?? $transaction['id']
+    ?? $pixInformation['transactionId']
+    ?? ''
+));
 if ($txid === '') {
-    log_evento('webhook_pix_sem_txid', 'Webhook sem transactionId.');
+    log_evento('webhook_pix_sem_txid', 'Webhook sem transaction id reconhecivel.', ['event' => $event ?: null]);
     http_response_code(200);
     exit('OK');
 }
@@ -63,9 +96,9 @@ $selectPackLink = db_has_column('produtos', 'pack_link') ? ', pr.pack_link' : ',
 $stmt = db()->prepare(
     'SELECT u.*, p.produto_id' . $selectFunil . $selectTipoOferta . $selectOrderbump . ', pr.nome AS produto_nome, pr.dias_acesso' . $selectProdutoTipo . $selectPackLink . '
      FROM pagamentos p
-     JOIN usuarios u ON u.id = p.usuario_id
-     LEFT JOIN produtos pr ON pr.id = p.produto_id
-     WHERE p.txid = ?
+     JOIN usuarios u ON u.id = p.usuario_id AND ' . tenant_scope_condition('usuarios', 'u') . '
+     LEFT JOIN produtos pr ON pr.id = p.produto_id AND ' . tenant_scope_condition('produtos', 'pr') . '
+     WHERE p.txid = ? AND ' . tenant_scope_condition('pagamentos', 'p') . '
      LIMIT 1'
 );
 $stmt->execute([$txid]);

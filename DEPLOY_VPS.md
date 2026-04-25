@@ -27,7 +27,7 @@ Este projeto agora esta pronto para rodar em VPS mantendo o painel, o bot, os wo
 5. Configure SSL e dominio.
 6. Aponte novamente os webhooks:
    - Telegram: `setup_webhook.php`
-   - Ecompag: `webhook_pix.php?token=...`
+   - PestoPay: `webhook_pix.php?token=...`
 7. Configure os workers no cron com o `worker_runner.php`.
 8. Se usar comandos personalizados nos fluxos, sincronize o menu do bot pelo painel de `Fluxos`.
 
@@ -37,7 +37,7 @@ Se quiser subir tudo em containers:
 
 1. Entre em [deploy\vps](<G:\Documentos Ryzen\Downloads\aplicativo vps\deploy\vps>).
 2. Copie [deploy\vps\env.example](<G:\Documentos Ryzen\Downloads\aplicativo vps\deploy\vps\env.example:1>) para `.env`.
-3. Ajuste dominio, segredos, Telegram, Ecompag e dados do n8n.
+3. Ajuste dominio, segredos, Telegram, PestoPay e dados do n8n.
 4. Suba a stack:
 
 ```bash
@@ -63,7 +63,7 @@ Arquivos do stack:
 4. Atualize o banco com [database_update_funis.sql](G:\Documentos Ryzen\Downloads\files\database_update_funis.sql) se a instancia antiga ainda nao tiver todas as tabelas e colunas novas.
 5. Ajuste dominio, SSL, cron e credenciais.
 6. Valide o painel, os workers e os webhooks ainda em um subdominio de teste.
-7. So depois troque os webhooks oficiais do Telegram e da Ecompag para o dominio final da VPS.
+7. So depois troque os webhooks oficiais do Telegram e da PestoPay para o dominio final da VPS.
 
 ## Variaveis de ambiente
 
@@ -108,7 +108,7 @@ php /var/www/telegram-bot/current/worker_runner.php flows
 3. Testar `worker_runner.php`.
 4. Testar `telegram_webhook.php`.
 5. Testar `webhook_pix.php`.
-6. Trocar webhooks do Telegram e da Ecompag.
+6. Trocar webhooks do Telegram e da PestoPay.
 7. Fazer um pagamento real de validacao.
 
 ## Onde o n8n entra melhor

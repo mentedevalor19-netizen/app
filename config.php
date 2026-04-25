@@ -23,10 +23,13 @@ $detectedSiteUrl = rtrim($protocol . '://' . $host, '/');
 define('SITE_URL', rtrim(config_env('SITE_URL', $detectedSiteUrl), '/'));
 define('BASE_URL', rtrim(config_env('BASE_URL', SITE_URL), '/'));
 
-// Ecompag
-define('ECOMPAG_API_BASE', 'https://api.ecompag.com/v2');
-define('ECOMPAG_CLIENT_ID', config_env('ECOMPAG_CLIENT_ID', 'guinnsbru_8653907127'));
-define('ECOMPAG_CLIENT_SECRET', config_env('ECOMPAG_CLIENT_SECRET', '246c9768afcdf377f26d816e4c97949bd77fc65635d94e15d981989c639b8709'));
+// PestoPay
+define('PESTOPAY_API_BASE', rtrim(config_env('PESTOPAY_API_BASE', 'https://app.pestopay.com.br/api/v1'), '/'));
+define('PESTOPAY_PUBLIC_KEY', config_env('PESTOPAY_PUBLIC_KEY', config_env('ECOMPAG_CLIENT_ID', '')));
+define('PESTOPAY_SECRET_KEY', config_env('PESTOPAY_SECRET_KEY', config_env('ECOMPAG_CLIENT_SECRET', '')));
+define('ECOMPAG_API_BASE', PESTOPAY_API_BASE);
+define('ECOMPAG_CLIENT_ID', PESTOPAY_PUBLIC_KEY);
+define('ECOMPAG_CLIENT_SECRET', PESTOPAY_SECRET_KEY);
 define('WEBHOOK_SECRET', config_env('WEBHOOK_SECRET', 'Be!12345'));
 define('WEBHOOK_URL', BASE_URL . '/webhook.php');
 define('ECOMPAG_NOTIFY_URL', BASE_URL . '/webhook_pix.php?token=' . rawurlencode(WEBHOOK_SECRET));

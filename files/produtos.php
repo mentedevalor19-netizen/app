@@ -12,6 +12,8 @@ $msg = null;
 $editingId = (int) ($_GET['editar'] ?? 0);
 $hasTipo = db_has_column('produtos', 'tipo');
 $hasPackLink = db_has_column('produtos', 'pack_link');
+$produtoScope = tenant_scope_condition('produtos');
+$pagamentoScope = tenant_scope_condition('pagamentos');
 
 if (!db_has_table('produtos')) {
     $page_title = 'Produtos / Planos e Packs';
@@ -38,7 +40,7 @@ $form = [
 ];
 
 if ($editingId > 0) {
-    $stmt = $pdo->prepare('SELECT * FROM produtos WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM produtos WHERE id = ? AND ' . $produtoScope . ' LIMIT 1');
     $stmt->execute([$editingId]);
     $editing = $stmt->fetch();
 
@@ -96,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare(
                         'UPDATE produtos
                          SET nome = ?, descricao = ?, valor = ?, dias_acesso = ?, tipo = ?, pack_link = ?, ativo = ?, ordem = ?
-                         WHERE id = ?'
+                         WHERE id = ? AND ' . $produtoScope
                     )->execute([
                         $form['nome'],
                         $form['descricao'],
@@ -112,7 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare(
                         'UPDATE produtos
                          SET nome = ?, descricao = ?, valor = ?, dias_acesso = ?, ativo = ?, ordem = ?
-                         WHERE id = ?'
+                         WHERE id = ? AND ' . $produtoScope
                     )->execute([
                         $form['nome'],
                         $form['descricao'],
@@ -125,10 +127,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } else {
                 if ($hasTipo && $hasPackLink) {
-                    $pdo->prepare(
-                        'INSERT INTO produtos (nome, descricao, valor, dias_acesso, tipo, pack_link, ativo, ordem)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-                    )->execute([
+                    $columns = ['nome', 'descricao', 'valor', 'dias_acesso', 'tipo', 'pack_link', 'ativo', 'ordem'];
+                    $placeholders = ['?', '?', '?', '?', '?', '?', '?', '?'];
+                    $params = [
                         $form['nome'],
                         $form['descricao'],
                         (float) $form['valor'],
@@ -137,19 +138,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $form['tipo'] === 'pack' ? $form['pack_link'] : null,
                         $form['ativo'],
                         $form['ordem'],
-                    ]);
-                } else {
+                    ];
+                    tenant_insert_append('produtos', $columns, $placeholders, $params);
                     $pdo->prepare(
-                        'INSERT INTO produtos (nome, descricao, valor, dias_acesso, ativo, ordem)
-                         VALUES (?, ?, ?, ?, ?, ?)'
-                    )->execute([
+                        'INSERT INTO produtos (' . implode(', ', $columns) . ')
+                         VALUES (' . implode(', ', $placeholders) . ')'
+                    )->execute($params);
+                } else {
+                    $columns = ['nome', 'descricao', 'valor', 'dias_acesso', 'ativo', 'ordem'];
+                    $placeholders = ['?', '?', '?', '?', '?', '?'];
+                    $params = [
                         $form['nome'],
                         $form['descricao'],
                         (float) $form['valor'],
                         $form['dias_acesso'],
                         $form['ativo'],
                         $form['ordem'],
-                    ]);
+                    ];
+                    tenant_insert_append('produtos', $columns, $placeholders, $params);
+                    $pdo->prepare(
+                        'INSERT INTO produtos (' . implode(', ', $columns) . ')
+                         VALUES (' . implode(', ', $placeholders) . ')'
+                    )->execute($params);
                 }
             }
 
@@ -162,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int) ($_POST['id'] ?? 0);
         $ativo = (int) ($_POST['ativo'] ?? 0);
 
-        $pdo->prepare('UPDATE produtos SET ativo = ? WHERE id = ?')->execute([$ativo ? 0 : 1, $id]);
+        $pdo->prepare('UPDATE produtos SET ativo = ? WHERE id = ? AND ' . $produtoScope)->execute([$ativo ? 0 : 1, $id]);
         header('Location: ' . admin_url('produtos.php?ok=salvo'));
         exit;
     }
@@ -172,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $emUso = 0;
 
         if (db_has_column('pagamentos', 'produto_id')) {
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM pagamentos WHERE produto_id = ?');
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM pagamentos WHERE produto_id = ? AND ' . $pagamentoScope);
             $stmt->execute([$id]);
             $emUso = (int) $stmt->fetchColumn();
         }
@@ -180,14 +190,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($emUso > 0) {
             $msg = ['tipo' => 'warning', 'texto' => 'Esse produto possui pagamentos vinculados. Desative em vez de excluir.'];
         } else {
-            $pdo->prepare('DELETE FROM produtos WHERE id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM produtos WHERE id = ? AND ' . $produtoScope)->execute([$id]);
             header('Location: ' . admin_url('produtos.php?ok=excluido'));
             exit;
         }
     }
 }
 
-$produtos = $pdo->query('SELECT * FROM produtos ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtos = $pdo->query('SELECT * FROM produtos WHERE ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
 
 $page_title = 'Produtos / Planos e Packs';
 $page_subtitle = count($produtos) . ' produto(s) cadastrado(s)';

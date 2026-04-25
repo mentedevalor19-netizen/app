@@ -14,7 +14,7 @@ $pagina = max(1, (int) ($_GET['p'] ?? 1));
 $porPagina = 25;
 $offset = ($pagina - 1) * $porPagina;
 
-$where = ['1=1'];
+$where = ['1=1', tenant_scope_condition('pagamentos', 'p')];
 $params = [];
 
 if ($filtroStatus !== '') {
@@ -54,22 +54,25 @@ $fields = [
     'u.username',
     'u.telegram_id',
 ];
+$userJoinScope = tenant_scope_condition('usuarios', 'u');
+$productJoinScope = tenant_scope_condition('produtos', 'pr');
+$funilJoinScope = tenant_scope_condition('funis', 'f');
 
 if ($temProdutoId && $temTabelaProdutos) {
-    $joins[] = 'LEFT JOIN produtos pr ON pr.id = p.produto_id';
+    $joins[] = 'LEFT JOIN produtos pr ON pr.id = p.produto_id AND ' . $productJoinScope;
     $fields[] = 'pr.nome AS produto_nome';
 } else {
     $fields[] = 'NULL AS produto_nome';
 }
 
 if ($temFunilId && $temTabelaFunis) {
-    $joins[] = 'LEFT JOIN funis f ON f.id = p.funil_id';
+    $joins[] = 'LEFT JOIN funis f ON f.id = p.funil_id AND ' . $funilJoinScope;
     $fields[] = 'f.nome AS funil_nome';
 } else {
     $fields[] = 'NULL AS funil_nome';
 }
 
-$sqlTotal = "SELECT COUNT(*) FROM pagamentos p JOIN usuarios u ON u.id = p.usuario_id WHERE $whereSql";
+$sqlTotal = "SELECT COUNT(*) FROM pagamentos p JOIN usuarios u ON u.id = p.usuario_id AND $userJoinScope WHERE $whereSql";
 $stmtTotal = $pdo->prepare($sqlTotal);
 $stmtTotal->execute($params);
 $totalRows = (int) $stmtTotal->fetchColumn();
@@ -81,7 +84,7 @@ $sqlTotais = "SELECT
     SUM(CASE WHEN p.status = 'pago' THEN 1 ELSE 0 END) AS pagos,
     SUM(CASE WHEN p.status = 'pendente' THEN 1 ELSE 0 END) AS pendentes
   FROM pagamentos p
-  JOIN usuarios u ON u.id = p.usuario_id
+  JOIN usuarios u ON u.id = p.usuario_id AND $userJoinScope
   WHERE $whereSql";
 $stmtTotais = $pdo->prepare($sqlTotais);
 $stmtTotais->execute($params);
@@ -89,7 +92,7 @@ $totais = $stmtTotais->fetch() ?: ['total' => 0, 'receita' => 0, 'pagos' => 0, '
 
 $sql = "SELECT " . implode(', ', $fields) . "
   FROM pagamentos p
-  JOIN usuarios u ON u.id = p.usuario_id
+  JOIN usuarios u ON u.id = p.usuario_id AND $userJoinScope
   " . implode("\n", $joins) . "
   WHERE $whereSql
   ORDER BY p.created_at DESC

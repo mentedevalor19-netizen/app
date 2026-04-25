@@ -23,6 +23,7 @@ $pdo = db();
 $editingId = (int) ($_GET['editar'] ?? 0);
 $msg = null;
 $eventOptions = remarketing_event_options();
+$remarketingScope = tenant_scope_condition('remarketing_webhooks');
 
 $form = [
     'id' => 0,
@@ -35,7 +36,7 @@ $form = [
 ];
 
 if ($editingId > 0) {
-    $stmt = $pdo->prepare('SELECT * FROM remarketing_webhooks WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM remarketing_webhooks WHERE id = ? AND ' . $remarketingScope . ' LIMIT 1');
     $stmt->execute([$editingId]);
     $editing = $stmt->fetch();
 
@@ -83,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare(
                     'UPDATE remarketing_webhooks
                      SET nome = ?, evento = ?, webhook_url = ?, webhook_secret = ?, ativo = ?, ordem = ?
-                     WHERE id = ?'
+                     WHERE id = ? AND ' . $remarketingScope
                 )->execute([
                     $form['nome'],
                     $form['evento'],
@@ -94,17 +95,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $form['id'],
                 ]);
             } else {
-                $pdo->prepare(
-                    'INSERT INTO remarketing_webhooks (nome, evento, webhook_url, webhook_secret, ativo, ordem)
-                     VALUES (?, ?, ?, ?, ?, ?)'
-                )->execute([
+                $columns = ['nome', 'evento', 'webhook_url', 'webhook_secret', 'ativo', 'ordem'];
+                $placeholders = ['?', '?', '?', '?', '?', '?'];
+                $params = [
                     $form['nome'],
                     $form['evento'],
                     $form['webhook_url'],
                     $webhookSecret,
                     $form['ativo'],
                     $form['ordem'],
-                ]);
+                ];
+                tenant_insert_append('remarketing_webhooks', $columns, $placeholders, $params);
+                $pdo->prepare(
+                    'INSERT INTO remarketing_webhooks (' . implode(', ', $columns) . ')
+                     VALUES (' . implode(', ', $placeholders) . ')'
+                )->execute($params);
             }
 
             header('Location: ' . admin_url('remarketing.php?ok=salvo'));
@@ -117,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ativo = (int) ($_POST['ativo'] ?? 0);
 
         if ($id > 0) {
-            $pdo->prepare('UPDATE remarketing_webhooks SET ativo = ? WHERE id = ?')->execute([$ativo ? 0 : 1, $id]);
+            $pdo->prepare('UPDATE remarketing_webhooks SET ativo = ? WHERE id = ? AND ' . $remarketingScope)->execute([$ativo ? 0 : 1, $id]);
             header('Location: ' . admin_url('remarketing.php?ok=salvo'));
             exit;
         }
@@ -126,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($acao === 'excluir') {
         $id = (int) ($_POST['id'] ?? 0);
         if ($id > 0) {
-            $pdo->prepare('DELETE FROM remarketing_webhooks WHERE id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM remarketing_webhooks WHERE id = ? AND ' . $remarketingScope)->execute([$id]);
             header('Location: ' . admin_url('remarketing.php?ok=excluido'));
             exit;
         }
@@ -136,6 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $webhooks = $pdo->query(
     'SELECT *
      FROM remarketing_webhooks
+     WHERE ' . $remarketingScope . '
      ORDER BY ' . db_order_by_clause('remarketing_webhooks')
 )->fetchAll();
 

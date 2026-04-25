@@ -36,6 +36,10 @@ $hasWebhookColumns = db_has_column('downsells', 'webhook_url') && db_has_column(
 $pdo = db();
 $editingId = (int) ($_GET['editar'] ?? 0);
 $msg = null;
+$downsellScope = tenant_scope_condition('downsells');
+$funilScope = tenant_scope_condition('funis');
+$produtoScope = tenant_scope_condition('produtos');
+$disparoScope = tenant_scope_condition('downsell_disparos');
 
 $form = [
     'id' => 0,
@@ -53,7 +57,7 @@ $form = [
 ];
 
 if ($editingId > 0) {
-    $stmt = $pdo->prepare('SELECT * FROM downsells WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM downsells WHERE id = ? AND ' . $downsellScope . ' LIMIT 1');
     $stmt->execute([$editingId]);
     $editing = $stmt->fetch();
 
@@ -106,6 +110,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['tipo' => 'danger', 'texto' => 'Selecione o upsell de origem deste downsell.'];
         } elseif ($form['produto_id'] <= 0) {
             $msg = ['tipo' => 'danger', 'texto' => 'Selecione o produto ofertado no downsell.'];
+        } elseif (!get_funil_por_id($form['funil_id']) || !get_produto_por_id($form['produto_id'])) {
+            $msg = ['tipo' => 'danger', 'texto' => 'Funil e produto precisam pertencer ao workspace atual.'];
         } elseif ($form['media_tipo'] !== 'none' && $form['media_url'] === '') {
             $msg = ['tipo' => 'danger', 'texto' => 'Se escolher uma midia para o downsell, informe a URL publica dela.'];
         } elseif ($form['media_tipo'] !== 'none' && filter_var($form['media_url'], FILTER_VALIDATE_URL) === false) {
@@ -138,7 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $params[] = $webhookSecret;
                 }
 
-                $sql .= ', ativo = ? WHERE id = ?';
+                $sql .= ', ativo = ? WHERE id = ? AND ' . $downsellScope;
                 $params[] = $form['ativo'];
                 $params[] = $form['id'];
 
@@ -175,10 +181,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $columns[] = 'ativo';
                 $params[] = $form['ativo'];
 
-                $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+                $placeholders = array_fill(0, count($columns), '?');
+                tenant_insert_append('downsells', $columns, $placeholders, $params);
                 $pdo->prepare(
                     'INSERT INTO downsells (' . implode(', ', $columns) . ')
-                     VALUES (' . $placeholders . ')'
+                     VALUES (' . implode(', ', $placeholders) . ')'
                 )->execute($params);
             }
 
@@ -192,7 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ativo = (int) ($_POST['ativo'] ?? 0);
 
         if ($id > 0) {
-            $pdo->prepare('UPDATE downsells SET ativo = ? WHERE id = ?')->execute([$ativo ? 0 : 1, $id]);
+            $pdo->prepare('UPDATE downsells SET ativo = ? WHERE id = ? AND ' . $downsellScope)->execute([$ativo ? 0 : 1, $id]);
             header('Location: ' . admin_url('downsells.php?ok=salvo'));
             exit;
         }
@@ -203,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $emUso = 0;
 
         if (db_has_table('downsell_disparos')) {
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM downsell_disparos WHERE downsell_id = ?');
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM downsell_disparos WHERE downsell_id = ? AND ' . $disparoScope);
             $stmt->execute([$id]);
             $emUso += (int) $stmt->fetchColumn();
         }
@@ -211,7 +218,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($emUso > 0) {
             $msg = ['tipo' => 'warning', 'texto' => 'Esse downsell ja possui disparos registrados. Desative em vez de excluir.'];
         } else {
-            $pdo->prepare('DELETE FROM downsells WHERE id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM downsells WHERE id = ? AND ' . $downsellScope)->execute([$id]);
             header('Location: ' . admin_url('downsells.php?ok=excluido'));
             exit;
         }
@@ -221,15 +228,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $funis = $pdo->query(
     'SELECT f.*, p.nome AS produto_principal_nome
      FROM funis f
-     LEFT JOIN produtos p ON p.id = f.produto_principal_id
+     LEFT JOIN produtos p ON p.id = f.produto_principal_id AND ' . $produtoScope . '
+     WHERE ' . $funilScope . '
      ORDER BY ' . db_order_by_clause('funis', 'f')
 )->fetchAll();
-$produtos = $pdo->query('SELECT * FROM produtos ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtos = $pdo->query('SELECT * FROM produtos WHERE ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
 $downsells = $pdo->query(
     'SELECT d.*, f.nome AS funil_nome, p.nome AS produto_nome, p.valor AS produto_valor
      FROM downsells d
-     LEFT JOIN funis f ON f.id = d.funil_id
-     LEFT JOIN produtos p ON p.id = d.produto_id
+     LEFT JOIN funis f ON f.id = d.funil_id AND ' . $funilScope . '
+     LEFT JOIN produtos p ON p.id = d.produto_id AND ' . $produtoScope . '
+     WHERE ' . $downsellScope . '
      ORDER BY ' . db_order_by_clause('downsells', 'd')
 )->fetchAll();
 

@@ -9,6 +9,11 @@ if (auth_admin()) {
 }
 
 $erro = '';
+$sucesso = '';
+
+if (($_GET['ok'] ?? '') === 'cadastro') {
+    $sucesso = 'Workspace criado com sucesso. Agora e so entrar no painel.';
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
@@ -153,9 +158,19 @@ body {
   margin-bottom: 18px;
   padding: 13px 14px;
   border-radius: 14px;
+  font-size: 14px;
+}
+
+.alert-danger {
   border: 1px solid rgba(255, 107, 107, 0.2);
   background: rgba(255, 107, 107, 0.12);
   color: #ffd3d3;
+}
+
+.alert-success {
+  border: 1px solid rgba(44, 230, 166, 0.2);
+  background: rgba(44, 230, 166, 0.12);
+  color: #c8ffe8;
   font-size: 14px;
 }
 
@@ -165,6 +180,19 @@ body {
   color: #79829c;
   font-size: 12px;
   font-family: 'JetBrains Mono', monospace;
+}
+
+.login-link {
+  margin-top: 16px;
+  text-align: center;
+  color: #9fa8bf;
+  font-size: 13px;
+}
+
+.login-link a {
+  color: #ff9a4d;
+  text-decoration: none;
+  font-weight: 700;
 }
 </style>
 </head>
@@ -178,8 +206,12 @@ body {
     </div>
 
     <div class="login-card">
+      <?php if ($sucesso !== ''): ?>
+        <div class="alert alert-success"><?= htmlspecialchars($sucesso) ?></div>
+      <?php endif; ?>
+
       <?php if ($erro !== ''): ?>
-        <div class="alert"><?= htmlspecialchars($erro) ?></div>
+        <div class="alert alert-danger"><?= htmlspecialchars($erro) ?></div>
       <?php endif; ?>
 
       <form method="POST">
@@ -195,6 +227,10 @@ body {
 
         <button type="submit" class="btn">Entrar no painel</button>
       </form>
+
+      <div class="login-link">
+        Quer criar um painel para um novo cliente? <a href="<?= htmlspecialchars(admin_url('signup.php')) ?>">Cadastrar workspace</a>
+      </div>
     </div>
 
     <div class="login-footer">Acesso monitorado e registrado.</div>

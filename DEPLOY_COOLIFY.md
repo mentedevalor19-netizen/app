@@ -5,6 +5,7 @@ Este projeto agora esta preparado para rodar no `Coolify`, com o `n8n` na mesma 
 ## Arquivos desta stack
 
 - `database_supabase.sql`
+- `database_update_saas.sql`
 - `deploy/coolify/docker-compose.yml`
 - `deploy/coolify/env.example`
 - `deploy/coolify/docker/php-apache/Dockerfile`
@@ -20,8 +21,9 @@ Este projeto agora esta preparado para rodar no `Coolify`, com o `n8n` na mesma 
 
 1. Crie um projeto no Supabase.
 2. Abra o SQL Editor.
-3. Execute o arquivo `database_supabase.sql`.
-4. Guarde a connection string do Postgres.
+3. Se for uma instalacao nova, execute `database_supabase.sql`.
+4. Se o projeto ja estiver rodando e voce estiver migrando para modo SaaS, execute `database_update_saas.sql`.
+5. Guarde a connection string do Postgres.
 
 Recomendacao pratica:
 
@@ -93,8 +95,8 @@ As variaveis de ajuste sao:
 Depois do deploy:
 
 1. Abra o painel em `Configuracoes`.
-2. Confira `Base URL`, `Webhook secret`, token do Telegram e credenciais da Ecompag.
-3. Rode `setup_webhook.php?token=SEU_SEGREDO`.
+2. Confira `Base URL`, `Webhook secret`, token do Telegram e credenciais da PestoPay.
+3. Para cada workspace, rode `setup_webhook.php?tenant=SLUG_DO_WORKSPACE&token=SEU_SEGREDO`.
 4. Valide o webhook Pix.
 5. Preencha os webhooks opcionais em:
    - `Order Bump`
@@ -109,6 +111,8 @@ Depois do deploy:
 - webhooks por `order bump`, `upsell`, `downsell` e `remarketing`
 - eventos para `lead_start`, `pix_gerado`, `pagamento_aprovado`, `pack_entregue`, `acesso_expirado`, `orderbump_ofertado`, `upsell_ofertado` e `downsell_ofertado`
 - painel com menu separado para `Order Bump`, `Upsell`, `Downsell` e `Remarketing`
+- modo SaaS com `workspaces`, varios logins e configuracoes isoladas por tenant
+- signup de novos clientes em `files/signup.php`
 
 ## 9. Migracao de uma instalacao MySQL antiga
 
@@ -117,4 +121,5 @@ Se voce ainda estiver num banco MySQL antigo antes de ir para o Supabase:
 1. exporte os dados
 2. atualize a estrutura com `database_update_funis.sql`
 3. migre os dados para o Postgres
-4. depois aponte o Coolify para o Supabase
+4. execute `database_update_saas.sql`
+5. depois aponte o Coolify para o Supabase

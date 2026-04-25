@@ -1,6 +1,6 @@
 -- ============================================================
 -- database_supabase.sql
--- Estrutura completa para Supabase / PostgreSQL
+-- Estrutura SaaS multi-tenant para Supabase / PostgreSQL
 -- ============================================================
 
 SET TIME ZONE 'America/Sao_Paulo';
@@ -15,9 +15,25 @@ BEGIN
 END;
 $$;
 
+CREATE TABLE IF NOT EXISTS tenants (
+  id bigserial PRIMARY KEY,
+  nome varchar(150) NOT NULL,
+  slug varchar(120) NOT NULL UNIQUE,
+  status text NOT NULL DEFAULT 'ativo' CHECK (status IN ('ativo', 'suspenso')),
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO tenants (id, nome, slug, status)
+VALUES (1, 'Workspace Principal', 'workspace-principal', 'ativo')
+ON CONFLICT (id) DO NOTHING;
+
+SELECT setval(pg_get_serial_sequence('tenants', 'id'), COALESCE((SELECT MAX(id) FROM tenants), 1), true);
+
 CREATE TABLE IF NOT EXISTS usuarios (
   id bigserial PRIMARY KEY,
-  telegram_id bigint NOT NULL UNIQUE,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  telegram_id bigint NOT NULL,
   username varchar(100),
   first_name varchar(100),
   last_name varchar(100),
@@ -39,17 +55,18 @@ CREATE TABLE IF NOT EXISTS usuarios (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_usuarios_telegram_id ON usuarios (telegram_id);
-CREATE INDEX IF NOT EXISTS idx_usuarios_status ON usuarios (status);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_usuarios_tenant_telegram ON usuarios (tenant_id, telegram_id);
+CREATE INDEX IF NOT EXISTS idx_usuarios_tenant_status ON usuarios (tenant_id, status);
 
 CREATE TABLE IF NOT EXISTS pagamentos (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   usuario_id bigint NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
   produto_id bigint,
   funil_id bigint,
   tipo_oferta text NOT NULL DEFAULT 'principal' CHECK (tipo_oferta IN ('principal', 'upsell', 'downsell')),
   orderbump_id bigint,
-  txid varchar(120) NOT NULL UNIQUE,
+  txid varchar(120) NOT NULL,
   valor numeric(10, 2) NOT NULL,
   status text NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente', 'pago', 'expirado', 'cancelado')),
   qr_code text,
@@ -59,22 +76,24 @@ CREATE TABLE IF NOT EXISTS pagamentos (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_pagamentos_usuario_id ON pagamentos (usuario_id);
-CREATE INDEX IF NOT EXISTS idx_pagamentos_status ON pagamentos (status);
-CREATE INDEX IF NOT EXISTS idx_pagamentos_txid ON pagamentos (txid);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_pagamentos_tenant_txid ON pagamentos (tenant_id, txid);
+CREATE INDEX IF NOT EXISTS idx_pagamentos_tenant_usuario ON pagamentos (tenant_id, usuario_id);
+CREATE INDEX IF NOT EXISTS idx_pagamentos_tenant_status ON pagamentos (tenant_id, status);
 
 CREATE TABLE IF NOT EXISTS logs (
   id bigserial PRIMARY KEY,
+  tenant_id bigint REFERENCES tenants(id) ON DELETE CASCADE,
   tipo varchar(50) NOT NULL,
   mensagem text NOT NULL,
   dados jsonb,
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_logs_tipo ON logs (tipo);
+CREATE INDEX IF NOT EXISTS idx_logs_tenant_tipo ON logs (tenant_id, tipo);
 
 CREATE TABLE IF NOT EXISTS admins (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nome varchar(100) NOT NULL,
   email varchar(150) NOT NULL UNIQUE,
   senha_hash varchar(255) NOT NULL,
@@ -84,8 +103,9 @@ CREATE TABLE IF NOT EXISTS admins (
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO admins (id, nome, email, senha_hash, nivel)
+INSERT INTO admins (id, tenant_id, nome, email, senha_hash, nivel)
 VALUES (
+  1,
   1,
   'Administrador',
   'admin@admin.com',
@@ -110,6 +130,7 @@ CREATE INDEX IF NOT EXISTS idx_sessoes_admin_token ON sessoes_admin (token);
 
 CREATE TABLE IF NOT EXISTS produtos (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nome varchar(150) NOT NULL,
   descricao text,
   valor numeric(10, 2) NOT NULL,
@@ -122,25 +143,28 @@ CREATE TABLE IF NOT EXISTS produtos (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO produtos (id, nome, descricao, valor, dias_acesso, tipo, ordem)
-VALUES (1, 'Acesso VIP - 30 dias', 'Acesso completo ao grupo por 30 dias', 29.90, 30, 'grupo', 1)
+INSERT INTO produtos (id, tenant_id, nome, descricao, valor, dias_acesso, tipo, ordem)
+VALUES (1, 1, 'Acesso VIP - 30 dias', 'Acesso completo ao grupo por 30 dias', 29.90, 30, 'grupo', 1)
 ON CONFLICT (id) DO NOTHING;
 
 SELECT setval(pg_get_serial_sequence('produtos', 'id'), COALESCE((SELECT MAX(id) FROM produtos), 1), true);
 
-CREATE INDEX IF NOT EXISTS idx_produtos_ativo ON produtos (ativo);
+CREATE INDEX IF NOT EXISTS idx_produtos_tenant_ativo ON produtos (tenant_id, ativo);
 
 CREATE TABLE IF NOT EXISTS configuracoes (
   id bigserial PRIMARY KEY,
-  chave varchar(100) NOT NULL UNIQUE,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  chave varchar(100) NOT NULL,
   valor text,
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_configuracoes_chave ON configuracoes (chave);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_configuracoes_tenant_chave ON configuracoes (tenant_id, chave);
+CREATE INDEX IF NOT EXISTS idx_configuracoes_tenant_chave ON configuracoes (tenant_id, chave);
 
 CREATE TABLE IF NOT EXISTS funis (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nome varchar(150) NOT NULL,
   descricao text,
   headline varchar(255),
@@ -158,10 +182,11 @@ CREATE TABLE IF NOT EXISTS funis (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_funis_ativo ON funis (ativo);
+CREATE INDEX IF NOT EXISTS idx_funis_tenant_ativo ON funis (tenant_id, ativo);
 
 CREATE TABLE IF NOT EXISTS orderbumps (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nome varchar(150) NOT NULL,
   produto_principal_id bigint NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
   produto_id bigint NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
@@ -177,11 +202,12 @@ CREATE TABLE IF NOT EXISTS orderbumps (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_orderbumps_principal ON orderbumps (produto_principal_id);
-CREATE INDEX IF NOT EXISTS idx_orderbumps_ativo ON orderbumps (ativo);
+CREATE INDEX IF NOT EXISTS idx_orderbumps_tenant_principal ON orderbumps (tenant_id, produto_principal_id);
+CREATE INDEX IF NOT EXISTS idx_orderbumps_tenant_ativo ON orderbumps (tenant_id, ativo);
 
 CREATE TABLE IF NOT EXISTS downsells (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nome varchar(150) NOT NULL,
   funil_id bigint NOT NULL REFERENCES funis(id) ON DELETE CASCADE,
   produto_id bigint NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
@@ -197,11 +223,12 @@ CREATE TABLE IF NOT EXISTS downsells (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_downsells_funil ON downsells (funil_id);
-CREATE INDEX IF NOT EXISTS idx_downsells_ativo ON downsells (ativo);
+CREATE INDEX IF NOT EXISTS idx_downsells_tenant_funil ON downsells (tenant_id, funil_id);
+CREATE INDEX IF NOT EXISTS idx_downsells_tenant_ativo ON downsells (tenant_id, ativo);
 
 CREATE TABLE IF NOT EXISTS downsell_disparos (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   downsell_id bigint NOT NULL REFERENCES downsells(id) ON DELETE CASCADE,
   pagamento_id bigint NOT NULL REFERENCES pagamentos(id) ON DELETE CASCADE,
   usuario_id bigint NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -211,10 +238,11 @@ CREATE TABLE IF NOT EXISTS downsell_disparos (
   UNIQUE (downsell_id, pagamento_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_downsell_disparos_status ON downsell_disparos (status);
+CREATE INDEX IF NOT EXISTS idx_downsell_disparos_tenant_status ON downsell_disparos (tenant_id, status);
 
 CREATE TABLE IF NOT EXISTS fluxos (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nome varchar(150) NOT NULL,
   descricao text,
   gatilho text NOT NULL DEFAULT 'start' CHECK (gatilho IN ('start', 'comando', 'cpf_salvo', 'pix_gerado', 'pagamento_aprovado', 'pack_entregue', 'acesso_expirado')),
@@ -227,11 +255,12 @@ CREATE TABLE IF NOT EXISTS fluxos (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_fluxos_gatilho ON fluxos (gatilho);
-CREATE INDEX IF NOT EXISTS idx_fluxos_ativo ON fluxos (ativo);
+CREATE INDEX IF NOT EXISTS idx_fluxos_tenant_gatilho ON fluxos (tenant_id, gatilho);
+CREATE INDEX IF NOT EXISTS idx_fluxos_tenant_ativo ON fluxos (tenant_id, ativo);
 
 CREATE TABLE IF NOT EXISTS fluxo_etapas (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   fluxo_id bigint NOT NULL REFERENCES fluxos(id) ON DELETE CASCADE,
   nome varchar(150) NOT NULL,
   ordem integer NOT NULL DEFAULT 0,
@@ -248,11 +277,12 @@ CREATE TABLE IF NOT EXISTS fluxo_etapas (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_fluxo_etapas_fluxo ON fluxo_etapas (fluxo_id);
-CREATE INDEX IF NOT EXISTS idx_fluxo_etapas_ativo ON fluxo_etapas (ativo);
+CREATE INDEX IF NOT EXISTS idx_fluxo_etapas_tenant_fluxo ON fluxo_etapas (tenant_id, fluxo_id);
+CREATE INDEX IF NOT EXISTS idx_fluxo_etapas_tenant_ativo ON fluxo_etapas (tenant_id, ativo);
 
 CREATE TABLE IF NOT EXISTS fluxo_execucoes (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   fluxo_id bigint NOT NULL REFERENCES fluxos(id) ON DELETE CASCADE,
   etapa_id bigint NOT NULL REFERENCES fluxo_etapas(id) ON DELETE CASCADE,
   usuario_id bigint NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -267,11 +297,12 @@ CREATE TABLE IF NOT EXISTS fluxo_execucoes (
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_fluxo_execucoes_status ON fluxo_execucoes (status, scheduled_at);
-CREATE INDEX IF NOT EXISTS idx_fluxo_execucoes_fluxo ON fluxo_execucoes (fluxo_id);
+CREATE INDEX IF NOT EXISTS idx_fluxo_execucoes_tenant_status ON fluxo_execucoes (tenant_id, status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_fluxo_execucoes_tenant_fluxo ON fluxo_execucoes (tenant_id, fluxo_id);
 
 CREATE TABLE IF NOT EXISTS mailings (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nome varchar(150) NOT NULL,
   filtro_status text NOT NULL DEFAULT 'todos' CHECK (filtro_status IN ('todos', 'ativo', 'pendente', 'expirado')),
   mensagem text NOT NULL,
@@ -289,10 +320,11 @@ CREATE TABLE IF NOT EXISTS mailings (
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_mailings_status ON mailings (status);
+CREATE INDEX IF NOT EXISTS idx_mailings_tenant_status ON mailings (tenant_id, status);
 
 CREATE TABLE IF NOT EXISTS mailing_envios (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   mailing_id bigint NOT NULL REFERENCES mailings(id) ON DELETE CASCADE,
   usuario_id bigint NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
   status text NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente', 'enviado', 'falhou')),
@@ -302,12 +334,13 @@ CREATE TABLE IF NOT EXISTS mailing_envios (
   created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_mailing_envios_status ON mailing_envios (status);
-CREATE INDEX IF NOT EXISTS idx_mailing_envios_mailing ON mailing_envios (mailing_id);
-CREATE INDEX IF NOT EXISTS idx_mailing_envios_usuario ON mailing_envios (usuario_id);
+CREATE INDEX IF NOT EXISTS idx_mailing_envios_tenant_status ON mailing_envios (tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_mailing_envios_tenant_mailing ON mailing_envios (tenant_id, mailing_id);
+CREATE INDEX IF NOT EXISTS idx_mailing_envios_tenant_usuario ON mailing_envios (tenant_id, usuario_id);
 
 CREATE TABLE IF NOT EXISTS remarketing_webhooks (
   id bigserial PRIMARY KEY,
+  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nome varchar(150) NOT NULL,
   evento text NOT NULL DEFAULT 'lead_start' CHECK (evento IN ('lead_start', 'pix_gerado', 'pagamento_aprovado', 'pack_entregue', 'acesso_expirado', 'orderbump_ofertado', 'upsell_ofertado', 'downsell_ofertado')),
   webhook_url text NOT NULL,
@@ -318,7 +351,7 @@ CREATE TABLE IF NOT EXISTS remarketing_webhooks (
   updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_remarketing_evento ON remarketing_webhooks (evento, ativo);
+CREATE INDEX IF NOT EXISTS idx_remarketing_tenant_evento ON remarketing_webhooks (tenant_id, evento, ativo);
 
 DO $$
 BEGIN
@@ -346,6 +379,9 @@ BEGIN
       FOREIGN KEY (orderbump_id) REFERENCES orderbumps(id) ON DELETE SET NULL;
   END IF;
 END $$;
+
+DROP TRIGGER IF EXISTS trg_tenants_updated_at ON tenants;
+CREATE TRIGGER trg_tenants_updated_at BEFORE UPDATE ON tenants FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_usuarios_updated_at ON usuarios;
 CREATE TRIGGER trg_usuarios_updated_at BEFORE UPDATE ON usuarios FOR EACH ROW EXECUTE FUNCTION set_updated_at();

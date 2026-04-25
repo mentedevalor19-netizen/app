@@ -2,6 +2,20 @@
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/functions.php';
 
+$tenant = bootstrap_tenant_from_request();
+if (tenants_enabled() && !$tenant) {
+    http_response_code(200);
+    exit;
+}
+
+if (runtime_has_webhook_secret()) {
+    if (!request_has_valid_webhook_token()) {
+        log_evento('telegram_webhook_secret_invalido', 'Tentativa de webhook do Telegram com token invalido.');
+        http_response_code(200);
+        exit;
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(200);
     exit;
@@ -381,8 +395,8 @@ function iniciar_compra(array $usuario, int $produtoId, ?int $orderbumpId = null
         return;
     }
 
-    if (trim(runtime_ecompag_client_id()) === '' || trim(runtime_ecompag_client_secret()) === '') {
-        enviar_mensagem($chatId, 'As credenciais da Ecompag ainda nao estao configuradas. Preencha o client ID e o client secret no painel antes de gerar o Pix.');
+    if (!runtime_gateway_credentials_ready()) {
+        enviar_mensagem($chatId, 'As credenciais da PestoPay ainda nao estao configuradas. Preencha a public key e a secret key no painel antes de gerar o Pix.');
         return;
     }
 
@@ -463,8 +477,8 @@ function iniciar_compra_orderbump(array $usuario, int $orderbumpId): void
         return;
     }
 
-    if (trim(runtime_ecompag_client_id()) === '' || trim(runtime_ecompag_client_secret()) === '') {
-        enviar_mensagem($chatId, 'As credenciais da Ecompag ainda nao estao configuradas. Preencha o client ID e o client secret no painel antes de gerar o Pix.');
+    if (!runtime_gateway_credentials_ready()) {
+        enviar_mensagem($chatId, 'As credenciais da PestoPay ainda nao estao configuradas. Preencha a public key e a secret key no painel antes de gerar o Pix.');
         return;
     }
 
@@ -536,8 +550,8 @@ function iniciar_compra_funil(array $usuario, int $funilId, string $tipoOferta):
         return;
     }
 
-    if (trim(runtime_ecompag_client_id()) === '' || trim(runtime_ecompag_client_secret()) === '') {
-        enviar_mensagem($chatId, 'As credenciais da Ecompag ainda nao estao configuradas. Preencha o client ID e o client secret no painel antes de gerar o Pix.');
+    if (!runtime_gateway_credentials_ready()) {
+        enviar_mensagem($chatId, 'As credenciais da PestoPay ainda nao estao configuradas. Preencha a public key e a secret key no painel antes de gerar o Pix.');
         return;
     }
 
@@ -589,8 +603,8 @@ function iniciar_compra_downsell(array $usuario, int $downsellId): void
         return;
     }
 
-    if (trim(runtime_ecompag_client_id()) === '' || trim(runtime_ecompag_client_secret()) === '') {
-        enviar_mensagem($chatId, 'As credenciais da Ecompag ainda nao estao configuradas. Preencha o client ID e o client secret no painel antes de gerar o Pix.');
+    if (!runtime_gateway_credentials_ready()) {
+        enviar_mensagem($chatId, 'As credenciais da PestoPay ainda nao estao configuradas. Preencha a public key e a secret key no painel antes de gerar o Pix.');
         return;
     }
 

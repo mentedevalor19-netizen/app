@@ -36,6 +36,11 @@ if (!$hasMediaColumns) {
 $pdo = db();
 $editingId = (int) ($_GET['editar'] ?? 0);
 $msg = null;
+$funilScope = tenant_scope_condition('funis');
+$produtoScope = tenant_scope_condition('produtos');
+$downsellScope = tenant_scope_condition('downsells');
+$pagamentoScope = tenant_scope_condition('pagamentos');
+$fluxoScope = tenant_scope_condition('fluxos');
 
 $form = [
     'id' => 0,
@@ -55,7 +60,7 @@ $form = [
 ];
 
 if ($editingId > 0) {
-    $stmt = $pdo->prepare('SELECT * FROM funis WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT * FROM funis WHERE id = ? AND ' . $funilScope . ' LIMIT 1');
     $stmt->execute([$editingId]);
     $editing = $stmt->fetch();
 
@@ -114,6 +119,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['tipo' => 'danger', 'texto' => 'Selecione o produto de upsell.'];
         } elseif ($form['upsell_produto_id'] === $form['produto_principal_id']) {
             $msg = ['tipo' => 'danger', 'texto' => 'O produto principal e o upsell precisam ser diferentes.'];
+        } elseif (!get_produto_por_id($form['produto_principal_id']) || !get_produto_por_id($form['upsell_produto_id'])) {
+            $msg = ['tipo' => 'danger', 'texto' => 'Os produtos escolhidos precisam pertencer ao workspace atual.'];
         } elseif ($form['upsell_media_tipo'] !== 'none' && $form['upsell_media_url'] === '') {
             $msg = ['tipo' => 'danger', 'texto' => 'Se escolher uma midia para o upsell, informe a URL publica dela.'];
         } elseif ($form['upsell_media_tipo'] !== 'none' && filter_var($form['upsell_media_url'], FILTER_VALIDATE_URL) === false) {
@@ -151,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $params[] = $webhookSecret;
                 }
 
-                $sql .= ', ativo = ?, ordem = ? WHERE id = ?';
+                $sql .= ', ativo = ?, ordem = ? WHERE id = ? AND ' . $funilScope;
                 $params[] = $form['ativo'];
                 $params[] = $form['ordem'];
                 $params[] = $form['id'];
@@ -193,10 +200,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $params[] = $form['ativo'];
                 $params[] = $form['ordem'];
 
-                $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+                $placeholders = array_fill(0, count($columns), '?');
+                tenant_insert_append('funis', $columns, $placeholders, $params);
                 $pdo->prepare(
                     'INSERT INTO funis (' . implode(', ', $columns) . ')
-                     VALUES (' . $placeholders . ')'
+                     VALUES (' . implode(', ', $placeholders) . ')'
                 )->execute($params);
             }
 
@@ -210,7 +218,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ativo = (int) ($_POST['ativo'] ?? 0);
 
         if ($id > 0) {
-            $pdo->prepare('UPDATE funis SET ativo = ? WHERE id = ?')->execute([$ativo ? 0 : 1, $id]);
+            $pdo->prepare('UPDATE funis SET ativo = ? WHERE id = ? AND ' . $funilScope)->execute([$ativo ? 0 : 1, $id]);
             header('Location: ' . admin_url('funis.php?ok=salvo'));
             exit;
         }
@@ -221,19 +229,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $emUso = 0;
 
         if (db_has_table('downsells')) {
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM downsells WHERE funil_id = ?');
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM downsells WHERE funil_id = ? AND ' . $downsellScope);
             $stmt->execute([$id]);
             $emUso += (int) $stmt->fetchColumn();
         }
 
         if (db_has_table('fluxos') && db_has_column('fluxos', 'funil_id')) {
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM fluxos WHERE funil_id = ?');
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM fluxos WHERE funil_id = ? AND ' . $fluxoScope);
             $stmt->execute([$id]);
             $emUso += (int) $stmt->fetchColumn();
         }
 
         if (db_has_table('pagamentos') && db_has_column('pagamentos', 'funil_id')) {
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM pagamentos WHERE funil_id = ?');
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM pagamentos WHERE funil_id = ? AND ' . $pagamentoScope);
             $stmt->execute([$id]);
             $emUso += (int) $stmt->fetchColumn();
         }
@@ -241,21 +249,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($emUso > 0) {
             $msg = ['tipo' => 'warning', 'texto' => 'Esse funil possui registros vinculados. Desative em vez de excluir.'];
         } else {
-            $pdo->prepare('DELETE FROM funis WHERE id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM funis WHERE id = ? AND ' . $funilScope)->execute([$id]);
             header('Location: ' . admin_url('funis.php?ok=excluido'));
             exit;
         }
     }
 }
 
-$produtos = $pdo->query('SELECT * FROM produtos ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtos = $pdo->query('SELECT * FROM produtos WHERE ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
 $funis = $pdo->query(
     'SELECT f.*,
             p.nome AS produto_principal_nome, p.valor AS produto_principal_valor, p.tipo AS produto_principal_tipo,
             u.nome AS upsell_produto_nome, u.valor AS upsell_produto_valor, u.tipo AS upsell_produto_tipo
      FROM funis f
-     LEFT JOIN produtos p ON p.id = f.produto_principal_id
-     LEFT JOIN produtos u ON u.id = f.upsell_produto_id
+     LEFT JOIN produtos p ON p.id = f.produto_principal_id AND ' . $produtoScope . '
+     LEFT JOIN produtos u ON u.id = f.upsell_produto_id AND ' . $produtoScope . '
+     WHERE ' . $funilScope . '
      ORDER BY ' . db_order_by_clause('funis', 'f')
 )->fetchAll();
 

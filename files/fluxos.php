@@ -77,7 +77,7 @@ $fields = [
     ],
     'msg_pix_error' => [
         'label' => 'Mensagem de erro do Pix',
-        'help' => 'Usada quando o checkout nao consegue gerar o Pix por falta de configuracao ou erro na Ecompag.',
+    'help' => 'Usada quando o checkout nao consegue gerar o Pix por falta de configuracao ou erro na PestoPay.',
         'rows' => 5,
     ],
     'msg_upsell_offer' => [
@@ -146,7 +146,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($tabelas as $tabela) {
             if (db_has_table($tabela)) {
                 try {
-                    db()->exec('DELETE FROM ' . db_quote_identifier($tabela));
+                    $sql = 'DELETE FROM ' . db_quote_identifier($tabela);
+                    if (tenant_table_supports_scope($tabela)) {
+                        $sql .= ' WHERE ' . tenant_scope_condition($tabela);
+                    }
+                    db()->exec($sql);
                 } catch (Throwable $e) {
                     log_evento('cleanup_fluxos_fail', 'Falha ao limpar tabela antiga.', [
                         'tabela' => $tabela,

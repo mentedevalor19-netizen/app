@@ -12,18 +12,20 @@ $amanhaInicio = date('Y-m-d 00:00:00', strtotime('+1 day'));
 $inicioMes = date('Y-m-01 00:00:00');
 $inicioProximoMes = date('Y-m-01 00:00:00', strtotime('+1 month'));
 $expiraEmTresDias = date('Y-m-d H:i:s', strtotime('+3 days'));
+$userScope = tenant_scope_condition('usuarios');
+$paymentScope = tenant_scope_condition('pagamentos');
 
-$totalUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuarios')->fetchColumn();
-$stmtUsuariosAtivos = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE status = 'ativo' AND (data_expiracao IS NULL OR data_expiracao > ?)");
+$totalUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuarios WHERE ' . $userScope)->fetchColumn();
+$stmtUsuariosAtivos = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE $userScope AND status = 'ativo' AND (data_expiracao IS NULL OR data_expiracao > ?)");
 $stmtUsuariosAtivos->execute([$agora]);
 $usuariosAtivos = (int) $stmtUsuariosAtivos->fetchColumn();
-$stmtExpirandoHoje = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE status = 'ativo' AND data_expiracao >= ? AND data_expiracao < ?");
+$stmtExpirandoHoje = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE $userScope AND status = 'ativo' AND data_expiracao >= ? AND data_expiracao < ?");
 $stmtExpirandoHoje->execute([$hojeInicio, $amanhaInicio]);
 $usuariosExpirandoHoje = (int) $stmtExpirandoHoje->fetchColumn();
-$pagamentosConfirmados = (int) $pdo->query("SELECT COUNT(*) FROM pagamentos WHERE status = 'pago'")->fetchColumn();
-$pagamentosPendentes = (int) $pdo->query("SELECT COUNT(*) FROM pagamentos WHERE status = 'pendente'")->fetchColumn();
-$receitaTotal = (float) $pdo->query("SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE status = 'pago'")->fetchColumn();
-$stmtReceitaMes = $pdo->prepare("SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE status = 'pago' AND paid_at >= ? AND paid_at < ?");
+$pagamentosConfirmados = (int) $pdo->query("SELECT COUNT(*) FROM pagamentos WHERE $paymentScope AND status = 'pago'")->fetchColumn();
+$pagamentosPendentes = (int) $pdo->query("SELECT COUNT(*) FROM pagamentos WHERE $paymentScope AND status = 'pendente'")->fetchColumn();
+$receitaTotal = (float) $pdo->query("SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE $paymentScope AND status = 'pago'")->fetchColumn();
+$stmtReceitaMes = $pdo->prepare("SELECT COALESCE(SUM(valor), 0) FROM pagamentos WHERE $paymentScope AND status = 'pago' AND paid_at >= ? AND paid_at < ?");
 $stmtReceitaMes->execute([$inicioMes, $inicioProximoMes]);
 $receitaMes = (float) $stmtReceitaMes->fetchColumn();
 
@@ -31,6 +33,7 @@ $ultimosPagamentos = $pdo->query(
     "SELECT p.*, u.first_name, u.telegram_id
      FROM pagamentos p
      JOIN usuarios u ON u.id = p.usuario_id
+     WHERE $paymentScope
      ORDER BY p.created_at DESC
      LIMIT 8"
 )->fetchAll();
@@ -38,7 +41,8 @@ $ultimosPagamentos = $pdo->query(
 $stmtUsuariosExpirando = $pdo->prepare(
     "SELECT *
      FROM usuarios
-     WHERE status = 'ativo'
+     WHERE $userScope
+       AND status = 'ativo'
        AND data_expiracao BETWEEN ? AND ?
      ORDER BY data_expiracao ASC
      LIMIT 10"

@@ -15,9 +15,10 @@ $pdo = db();
 $msg = null;
 $senhaAdmin = null;
 $senhaId = (int) ($_GET['senha'] ?? 0);
+$adminScope = tenant_scope_condition('admins');
 
 if ($senhaId > 0) {
-    $stmt = $pdo->prepare('SELECT id, nome, email FROM admins WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, nome, email FROM admins WHERE id = ? AND ' . $adminScope . ' LIMIT 1');
     $stmt->execute([$senhaId]);
     $senhaAdmin = $stmt->fetch();
 
@@ -47,8 +48,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg = ['tipo' => 'danger', 'texto' => 'Ja existe um administrador com esse e-mail.'];
             } else {
                 $hash = password_hash($senha, PASSWORD_BCRYPT, ['cost' => 12]);
-                $pdo->prepare('INSERT INTO admins (nome, email, senha_hash, nivel) VALUES (?, ?, ?, ?)')
-                    ->execute([$nome, $email, $hash, $nivel]);
+                $pdo->prepare('INSERT INTO admins (tenant_id, nome, email, senha_hash, nivel) VALUES (?, ?, ?, ?, ?)')
+                    ->execute([current_tenant_id(), $nome, $email, $hash, $nivel]);
                 header('Location: ' . admin_url('admins.php?ok=salvo'));
                 exit;
             }
@@ -59,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int) ($_POST['id'] ?? 0);
 
         if ($id !== (int) $current_admin['id']) {
-            $pdo->prepare('UPDATE admins SET ativo = NOT ativo WHERE id = ?')->execute([$id]);
+            $pdo->prepare('UPDATE admins SET ativo = NOT ativo WHERE id = ? AND ' . $adminScope)->execute([$id]);
             header('Location: ' . admin_url('admins.php?ok=salvo'));
             exit;
         } else {
@@ -75,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['tipo' => 'danger', 'texto' => 'A nova senha precisa ter pelo menos 8 caracteres.'];
         } else {
             $hash = password_hash($novaSenha, PASSWORD_BCRYPT, ['cost' => 12]);
-            $pdo->prepare('UPDATE admins SET senha_hash = ? WHERE id = ?')->execute([$hash, $id]);
+            $pdo->prepare('UPDATE admins SET senha_hash = ? WHERE id = ? AND ' . $adminScope)->execute([$hash, $id]);
             header('Location: ' . admin_url('admins.php?ok=salvo'));
             exit;
         }
@@ -87,14 +88,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($id === (int) $current_admin['id']) {
             $msg = ['tipo' => 'warning', 'texto' => 'Voce nao pode excluir sua propria conta logada.'];
         } else {
-            $pdo->prepare('DELETE FROM admins WHERE id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM admins WHERE id = ? AND ' . $adminScope)->execute([$id]);
             header('Location: ' . admin_url('admins.php?ok=excluido'));
             exit;
         }
     }
 }
 
-$admins = $pdo->query("SELECT * FROM admins ORDER BY CASE nivel WHEN 'super' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, created_at ASC")->fetchAll();
+$admins = $pdo->query("SELECT * FROM admins WHERE $adminScope ORDER BY CASE nivel WHEN 'super' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, created_at ASC")->fetchAll();
 
 $page_title = 'Administradores';
 $page_subtitle = count($admins) . ' admin(s) cadastrado(s)';

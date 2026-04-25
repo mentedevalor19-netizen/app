@@ -1,16 +1,342 @@
 <?php
 require_once __DIR__ . '/config.php';
 
+function tenants_enabled(): bool
+{
+    return db_has_table('tenants') && db_has_column('admins', 'tenant_id');
+}
+
+function tenant_table_supports_scope(string $table): bool
+{
+    return tenants_enabled() && db_has_column($table, 'tenant_id');
+}
+
+function clear_app_settings_cache(): void
+{
+    foreach (array_keys($GLOBALS) as $key) {
+        if (strpos((string) $key, 'app_settings_cache:') === 0) {
+            unset($GLOBALS[$key]);
+        }
+    }
+}
+
+function set_current_tenant_context(?array $tenant): void
+{
+    $GLOBALS['app_current_tenant'] = $tenant ?: null;
+    clear_app_settings_cache();
+}
+
+function current_tenant(): ?array
+{
+    $tenant = $GLOBALS['app_current_tenant'] ?? null;
+    return is_array($tenant) ? $tenant : null;
+}
+
+function current_tenant_id(): int
+{
+    return (int) (current_tenant()['id'] ?? 0);
+}
+
+function current_tenant_slug(): string
+{
+    return trim((string) (current_tenant()['slug'] ?? ''));
+}
+
+function current_tenant_name(): string
+{
+    $tenant = current_tenant();
+    if (!$tenant) {
+        return '';
+    }
+
+    return trim((string) ($tenant['nome'] ?? $tenant['name'] ?? ''));
+}
+
+function get_tenant_by_id(int $tenantId): ?array
+{
+    if ($tenantId <= 0 || !db_has_table('tenants')) {
+        return null;
+    }
+
+    $stmt = db()->prepare('SELECT * FROM tenants WHERE id = ? LIMIT 1');
+    $stmt->execute([$tenantId]);
+    $tenant = $stmt->fetch();
+
+    return $tenant ?: null;
+}
+
+function get_tenant_by_slug(string $slug): ?array
+{
+    $slug = trim($slug);
+    if ($slug === '' || !db_has_table('tenants')) {
+        return null;
+    }
+
+    $stmt = db()->prepare('SELECT * FROM tenants WHERE slug = ? LIMIT 1');
+    $stmt->execute([$slug]);
+    $tenant = $stmt->fetch();
+
+    return $tenant ?: null;
+}
+
+function tenant_slugify(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return 'workspace';
+    }
+
+    $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value);
+    if ($ascii !== false) {
+        $value = $ascii;
+    }
+
+    $value = strtolower($value);
+    $value = preg_replace('/[^a-z0-9]+/', '-', $value) ?: '';
+    $value = trim($value, '-');
+
+    return $value !== '' ? $value : 'workspace';
+}
+
+function tenant_unique_slug(string $nome): string
+{
+    $base = tenant_slugify($nome);
+    $slug = $base;
+    $suffix = 2;
+
+    while (get_tenant_by_slug($slug)) {
+        $slug = $base . '-' . $suffix;
+        $suffix++;
+    }
+
+    return $slug;
+}
+
+function bootstrap_tenant_from_request(): ?array
+{
+    if (!tenants_enabled()) {
+        return null;
+    }
+
+    $slug = trim((string) ($_GET['tenant'] ?? $_POST['tenant'] ?? ''));
+    if ($slug === '') {
+        return current_tenant();
+    }
+
+    $tenant = get_tenant_by_slug($slug);
+    if ($tenant) {
+        set_current_tenant_context($tenant);
+    }
+
+    return $tenant ?: null;
+}
+
+function bootstrap_tenant_from_admin(array $admin): ?array
+{
+    if (!tenants_enabled()) {
+        return null;
+    }
+
+    $tenantId = (int) ($admin['tenant_id'] ?? 0);
+    if ($tenantId <= 0) {
+        set_current_tenant_context(null);
+        return null;
+    }
+
+    $tenant = get_tenant_by_id($tenantId);
+    set_current_tenant_context($tenant);
+    return $tenant;
+}
+
+function tenant_scope_condition(string $table, string $alias = ''): string
+{
+    if (!tenant_table_supports_scope($table)) {
+        return '1=1';
+    }
+
+    $tenantId = current_tenant_id();
+    if ($tenantId <= 0) {
+        return '1=0';
+    }
+
+    $prefix = $alias !== '' ? $alias . '.' : '';
+    return $prefix . 'tenant_id = ' . (int) $tenantId;
+}
+
+function tenant_insert_append(string $table, array &$columns, array &$placeholders, array &$params): void
+{
+    if (!tenant_table_supports_scope($table) || in_array('tenant_id', $columns, true)) {
+        return;
+    }
+
+    $tenantId = current_tenant_id();
+    if ($tenantId <= 0) {
+        throw new RuntimeException('Tenant nao definido para salvar em ' . $table . '.');
+    }
+
+    $columns[] = 'tenant_id';
+    $placeholders[] = '?';
+    $params[] = $tenantId;
+}
+
+function url_with_query_params(string $path, array $params = []): string
+{
+    $params = array_filter($params, static fn($value): bool => $value !== null && $value !== '');
+    if (!$params) {
+        return $path;
+    }
+
+    return $path . (strpos($path, '?') === false ? '?' : '&') . http_build_query($params);
+}
+
+function tenant_public_query_params(bool $includeToken = false): array
+{
+    $params = [];
+
+    if (current_tenant_slug() !== '') {
+        $params['tenant'] = current_tenant_slug();
+    }
+
+    if ($includeToken && runtime_has_webhook_secret()) {
+        $params['token'] = runtime_webhook_secret();
+    }
+
+    return $params;
+}
+
+function register_workspace_admin(string $workspaceName, string $ownerName, string $email, string $password): array
+{
+    if (!db_has_table('tenants') || !db_has_column('admins', 'tenant_id')) {
+        throw new RuntimeException('A base SaaS ainda nao foi aplicada no banco.');
+    }
+
+    $workspaceName = trim($workspaceName);
+    $ownerName = trim($ownerName);
+    $email = strtolower(trim($email));
+
+    if ($workspaceName === '' || $ownerName === '') {
+        throw new InvalidArgumentException('Informe o nome do workspace e o nome do responsavel.');
+    }
+
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new InvalidArgumentException('Informe um e-mail valido.');
+    }
+
+    if (strlen($password) < 8) {
+        throw new InvalidArgumentException('A senha precisa ter pelo menos 8 caracteres.');
+    }
+
+    $pdo = db();
+    $previousTenant = current_tenant();
+
+    try {
+        $pdo->beginTransaction();
+
+        $stmt = $pdo->prepare('SELECT id FROM admins WHERE email = ? LIMIT 1');
+        $stmt->execute([$email]);
+        if ($stmt->fetch()) {
+            throw new InvalidArgumentException('Ja existe um administrador com esse e-mail.');
+        }
+
+        $slug = tenant_unique_slug($workspaceName);
+        $now = db_now();
+
+        $pdo->prepare(
+            'INSERT INTO tenants (nome, slug, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([$workspaceName, $slug, 'ativo', $now, $now]);
+
+        $tenant = get_tenant_by_id((int) $pdo->lastInsertId());
+        if (!$tenant) {
+            throw new RuntimeException('Nao foi possivel criar o workspace.');
+        }
+
+        set_current_tenant_context($tenant);
+
+        $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
+        $pdo->prepare(
+            'INSERT INTO admins (tenant_id, nome, email, senha_hash, nivel, ativo, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            (int) $tenant['id'],
+            $ownerName,
+            $email,
+            $hash,
+            'super',
+            1,
+            $now,
+        ]);
+
+        if (db_has_table('configuracoes')) {
+            app_setting_save('site_url', SITE_URL);
+            app_setting_save('base_url', BASE_URL);
+            app_setting_save('webhook_secret', bin2hex(random_bytes(16)));
+        }
+
+        if (db_has_table('produtos')) {
+            $stmtProduto = $pdo->prepare('SELECT COUNT(*) FROM produtos WHERE ' . tenant_scope_condition('produtos'));
+            $stmtProduto->execute();
+            if ((int) $stmtProduto->fetchColumn() === 0) {
+                $columns = ['nome', 'descricao', 'valor', 'dias_acesso', 'tipo', 'pack_link', 'ativo', 'ordem'];
+                $placeholders = ['?', '?', '?', '?', '?', '?', '?', '?'];
+                $params = [
+                    DEFAULT_PRODUCT_NAME,
+                    DEFAULT_PRODUCT_DESCRIPTION,
+                    DEFAULT_PRODUCT_PRICE,
+                    DEFAULT_PRODUCT_DAYS,
+                    'grupo',
+                    null,
+                    1,
+                    1,
+                ];
+                tenant_insert_append('produtos', $columns, $placeholders, $params);
+
+                $pdo->prepare(
+                    'INSERT INTO produtos (' . implode(', ', $columns) . ')
+                     VALUES (' . implode(', ', $placeholders) . ')'
+                )->execute($params);
+            }
+        }
+
+        $pdo->commit();
+
+        return [
+            'tenant' => $tenant,
+            'admin_email' => $email,
+        ];
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    } finally {
+        set_current_tenant_context($previousTenant);
+    }
+}
+
 function app_settings(): array
 {
-    if (array_key_exists('app_settings_cache', $GLOBALS) && is_array($GLOBALS['app_settings_cache'])) {
-        return $GLOBALS['app_settings_cache'];
+    $cacheKey = 'app_settings_cache:' . (tenant_table_supports_scope('configuracoes') ? current_tenant_id() : 'legacy');
+    if (array_key_exists($cacheKey, $GLOBALS) && is_array($GLOBALS[$cacheKey])) {
+        return $GLOBALS[$cacheKey];
     }
 
     $settings = [];
 
     try {
-        $rows = db()->query('SELECT chave, valor FROM configuracoes')->fetchAll();
+        if (tenant_table_supports_scope('configuracoes')) {
+            $tenantId = current_tenant_id();
+            if ($tenantId > 0) {
+                $stmt = db()->prepare('SELECT chave, valor FROM configuracoes WHERE tenant_id = ?');
+                $stmt->execute([$tenantId]);
+                $rows = $stmt->fetchAll();
+            } else {
+                $rows = [];
+            }
+        } else {
+            $rows = db()->query('SELECT chave, valor FROM configuracoes')->fetchAll();
+        }
+
         foreach ($rows as $row) {
             $settings[$row['chave']] = $row['valor'];
         }
@@ -18,7 +344,7 @@ function app_settings(): array
         // Primeira instalação ou tabela ainda não criada.
     }
 
-    $GLOBALS['app_settings_cache'] = $settings;
+    $GLOBALS[$cacheKey] = $settings;
     return $settings;
 }
 
@@ -35,17 +361,34 @@ function app_setting(string $key, $default = null)
 function app_setting_save(string $key, ?string $value): void
 {
     $updatedAt = db_now();
-    $stmt = db()->prepare('UPDATE configuracoes SET valor = ?, updated_at = ? WHERE chave = ?');
-    $stmt->execute([$value, $updatedAt, $key]);
+    if (tenant_table_supports_scope('configuracoes')) {
+        $tenantId = current_tenant_id();
+        if ($tenantId <= 0) {
+            throw new RuntimeException('Tenant nao definido para salvar configuracoes.');
+        }
 
-    if ($stmt->rowCount() === 0) {
-        db()->prepare(
-            'INSERT INTO configuracoes (chave, valor, updated_at)
-             VALUES (?, ?, ?)'
-        )->execute([$key, $value, $updatedAt]);
+        $stmt = db()->prepare('UPDATE configuracoes SET valor = ?, updated_at = ? WHERE tenant_id = ? AND chave = ?');
+        $stmt->execute([$value, $updatedAt, $tenantId, $key]);
+
+        if ($stmt->rowCount() === 0) {
+            db()->prepare(
+                'INSERT INTO configuracoes (tenant_id, chave, valor, updated_at)
+                 VALUES (?, ?, ?, ?)'
+            )->execute([$tenantId, $key, $value, $updatedAt]);
+        }
+    } else {
+        $stmt = db()->prepare('UPDATE configuracoes SET valor = ?, updated_at = ? WHERE chave = ?');
+        $stmt->execute([$value, $updatedAt, $key]);
+
+        if ($stmt->rowCount() === 0) {
+            db()->prepare(
+                'INSERT INTO configuracoes (chave, valor, updated_at)
+                 VALUES (?, ?, ?)'
+            )->execute([$key, $value, $updatedAt]);
+        }
     }
 
-    unset($GLOBALS['app_settings_cache']);
+    clear_app_settings_cache();
 }
 
 function db_driver(): string
@@ -117,12 +460,32 @@ function request_has_valid_webhook_token(): bool
 
 function runtime_ecompag_client_id(): string
 {
-    return (string) app_setting('ecompag_client_id', ECOMPAG_CLIENT_ID);
+    return runtime_pestopay_public_key();
 }
 
 function runtime_ecompag_client_secret(): string
 {
-    return (string) app_setting('ecompag_client_secret', ECOMPAG_CLIENT_SECRET);
+    return runtime_pestopay_secret_key();
+}
+
+function runtime_pestopay_public_key(): string
+{
+    return trim((string) app_setting('pestopay_public_key', app_setting('ecompag_client_id', PESTOPAY_PUBLIC_KEY)));
+}
+
+function runtime_pestopay_secret_key(): string
+{
+    return trim((string) app_setting('pestopay_secret_key', app_setting('ecompag_client_secret', PESTOPAY_SECRET_KEY)));
+}
+
+function runtime_pestopay_webhook_token(): string
+{
+    return trim((string) app_setting('pestopay_webhook_token', ''));
+}
+
+function runtime_gateway_credentials_ready(): bool
+{
+    return runtime_pestopay_public_key() !== '' && runtime_pestopay_secret_key() !== '';
 }
 
 function runtime_telegram_bot_token(): string
@@ -142,12 +505,18 @@ function runtime_telegram_api(): string
 
 function runtime_telegram_webhook_url(): string
 {
-    return runtime_base_url() . '/telegram_webhook.php';
+    return url_with_query_params(
+        runtime_base_url() . '/telegram_webhook.php',
+        tenant_public_query_params(true)
+    );
 }
 
 function runtime_ecompag_notify_url(): string
 {
-    return runtime_base_url() . '/webhook_pix.php?token=' . rawurlencode(runtime_webhook_secret());
+    return url_with_query_params(
+        runtime_base_url() . '/webhook_pix.php',
+        tenant_public_query_params(true)
+    );
 }
 
 function runtime_n8n_webhook_url(): string
@@ -421,7 +790,7 @@ function bot_journey_message_groups(): array
             'fields' => [
                 'msg_pix_generating' => [
                     'label' => 'Mensagem gerando Pix',
-                    'help' => 'Enviada assim que o usuario escolhe o item e o bot vai falar com a Ecompag.',
+            'help' => 'Enviada assim que o usuario escolhe o item e o bot vai falar com a PestoPay.',
                     'rows' => 3,
                 ],
                 'msg_pix_generated' => [
@@ -431,7 +800,7 @@ function bot_journey_message_groups(): array
                 ],
                 'msg_pix_error' => [
                     'label' => 'Mensagem de erro ao gerar Pix',
-                    'help' => 'Fallback quando a Ecompag nao responde como esperado.',
+            'help' => 'Fallback quando a PestoPay nao responde como esperado.',
                     'rows' => 3,
                 ],
                 'msg_payment_confirmed' => [
@@ -576,7 +945,7 @@ function get_fluxo_por_id(int $fluxoId): ?array
         return null;
     }
 
-    $stmt = db()->prepare('SELECT * FROM fluxos WHERE id = ? LIMIT 1');
+    $stmt = db()->prepare('SELECT * FROM fluxos WHERE id = ? AND ' . tenant_scope_condition('fluxos') . ' LIMIT 1');
     $stmt->execute([$fluxoId]);
     $fluxo = $stmt->fetch();
 
@@ -611,7 +980,7 @@ function ensure_default_start_flow(): ?array
         }
     }
 
-    $sql = "SELECT * FROM fluxos WHERE gatilho = 'start'";
+    $sql = "SELECT * FROM fluxos WHERE gatilho = 'start' AND " . tenant_scope_condition('fluxos');
     if (db_has_column('fluxos', 'comando')) {
         $sql .= " AND (comando IS NULL OR comando = '')";
     }
@@ -634,10 +1003,9 @@ function ensure_default_start_flow(): ?array
         $blueprint = default_start_flow_blueprint();
 
         if (db_has_column('fluxos', 'comando') && db_has_column('fluxos', 'descricao_comando')) {
-            db()->prepare(
-                'INSERT INTO fluxos (nome, descricao, gatilho, comando, descricao_comando, produto_id, funil_id, ativo, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            )->execute([
+            $columns = ['nome', 'descricao', 'gatilho', 'comando', 'descricao_comando', 'produto_id', 'funil_id', 'ativo', 'created_at'];
+            $placeholders = ['?', '?', '?', '?', '?', '?', '?', '?', '?'];
+            $params = [
                 $blueprint['nome'],
                 $blueprint['descricao'],
                 $blueprint['gatilho'],
@@ -647,12 +1015,16 @@ function ensure_default_start_flow(): ?array
                 null,
                 $blueprint['ativo'],
                 db_now(),
-            ]);
+            ];
+            tenant_insert_append('fluxos', $columns, $placeholders, $params);
+            db()->prepare(
+                'INSERT INTO fluxos (' . implode(', ', $columns) . ')
+                 VALUES (' . implode(', ', $placeholders) . ')'
+            )->execute($params);
         } else {
-            db()->prepare(
-                'INSERT INTO fluxos (nome, descricao, gatilho, produto_id, funil_id, ativo, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)'
-            )->execute([
+            $columns = ['nome', 'descricao', 'gatilho', 'produto_id', 'funil_id', 'ativo', 'created_at'];
+            $placeholders = ['?', '?', '?', '?', '?', '?', '?'];
+            $params = [
                 $blueprint['nome'],
                 $blueprint['descricao'],
                 $blueprint['gatilho'],
@@ -660,7 +1032,12 @@ function ensure_default_start_flow(): ?array
                 null,
                 $blueprint['ativo'],
                 db_now(),
-            ]);
+            ];
+            tenant_insert_append('fluxos', $columns, $placeholders, $params);
+            db()->prepare(
+                'INSERT INTO fluxos (' . implode(', ', $columns) . ')
+                 VALUES (' . implode(', ', $placeholders) . ')'
+            )->execute($params);
         }
 
         $flow = get_fluxo_por_id((int) db()->lastInsertId());
@@ -829,7 +1206,7 @@ function template_default(string $key): string
         'msg_cpf_saved' => "CPF salvo com sucesso.",
         'msg_cpf_invalid' => "Esse CPF parece inválido. Envie novamente com 11 números.",
         'msg_pix_generating' => "Gerando seu Pix para <b>{produto}</b>. Aguarde alguns segundos.",
-        'msg_pix_error' => "Nao consegui gerar o Pix agora. Verifique se o CPF fixo do checkout tem 11 numeros e se as credenciais da Ecompag estao corretas.",
+        'msg_pix_error' => "Nao consegui gerar o Pix agora. Verifique se o CPF fixo do checkout tem 11 numeros e se as credenciais da PestoPay estao corretas.",
         'msg_pix_generated' => "<b>Pix gerado com sucesso</b>\n\nPlano: <b>{produto}</b>\nValor: <b>{valor}</b>\nTXID: <code>{txid}</code>\n\n<b>Copia e cola</b>\n<code>{pix}</code>\n\nApós o pagamento, o bot envia seu convite automaticamente.",
         'msg_payment_confirmed' => "Pagamento confirmado.\n\nOlá, <b>{nome}</b>.\nPlano: <b>{produto}</b>\nAcesso liberado até <b>{expira}</b>.\n\nEntre no grupo pelo link abaixo:\n{convite}\n\nEsse link é individual e expira em 1 hora.",
         'msg_payment_confirmed_no_invite' => "Pagamento confirmado.\n\nOlá, <b>{nome}</b>.\nSeu acesso já foi liberado até <b>{expira}</b>, mas houve falha ao gerar o convite automático.\nEntre em contato com o suporte para receber o link.",
@@ -864,7 +1241,7 @@ function template_default_runtime(string $key): string
         'msg_cpf_saved' => "CPF salvo com sucesso.",
         'msg_cpf_invalid' => "Esse CPF parece invalido. Envie novamente com 11 numeros.",
         'msg_pix_generating' => "Gerando seu Pix para <b>{produto}</b>. Aguarde alguns segundos.",
-        'msg_pix_error' => "Nao consegui gerar o Pix agora. Verifique se o CPF fixo do checkout tem 11 numeros e se as credenciais da Ecompag estao corretas.",
+        'msg_pix_error' => "Nao consegui gerar o Pix agora. Verifique se o CPF fixo do checkout tem 11 numeros e se as credenciais da PestoPay estao corretas.",
         'msg_pix_generated' => "<b>Pix gerado com sucesso</b>\n\nProduto: <b>{produto}</b>\nValor: <b>{valor}</b>\nTXID: <code>{txid}</code>\n\n<b>Copia e cola</b>\n<code>{pix}</code>\n\nApos o pagamento, o bot libera seu acesso ou envia o link automaticamente.",
         'msg_payment_confirmed' => "Pagamento confirmado.\n\nOla, <b>{nome}</b>.\nPlano: <b>{produto}</b>\nAcesso liberado ate <b>{expira}</b>.\n\nEntre no grupo pelo link abaixo:\n{convite}\n\nEsse link e individual e expira em 1 hora.",
         'msg_payment_confirmed_no_invite' => "Pagamento confirmado.\n\nOla, <b>{nome}</b>.\nSeu acesso ja foi liberado ate <b>{expira}</b>, mas houve falha ao gerar o convite automatico.\nEntre em contato com o suporte para receber o link.",
@@ -888,8 +1265,8 @@ function message_template(string $key): string
 
     if ($key === 'msg_pix_error') {
         $legacyMessages = [
-            'Nao consegui gerar o Pix agora. Verifique as credenciais da Ecompag e tente novamente em alguns minutos.',
-            'Não consegui gerar o Pix agora. Verifique as credenciais da Ecompag e tente novamente em alguns minutos.',
+            'Nao consegui gerar o Pix agora. Verifique as credenciais da PestoPay e tente novamente em alguns minutos.',
+            'Não consegui gerar o Pix agora. Verifique as credenciais da PestoPay e tente novamente em alguns minutos.',
         ];
 
         if (in_array(trim($message), $legacyMessages, true)) {
@@ -1171,7 +1548,7 @@ function get_fluxo_etapas(int $fluxoId, bool $onlyActive = true): array
         return [];
     }
 
-    $sql = 'SELECT * FROM fluxo_etapas WHERE fluxo_id = ?';
+    $sql = 'SELECT * FROM fluxo_etapas WHERE fluxo_id = ? AND ' . tenant_scope_condition('fluxo_etapas');
     if ($onlyActive) {
         $sql .= ' AND ativo = 1';
     }
@@ -1201,7 +1578,7 @@ function disparar_fluxos(string $gatilho, array $context = []): array
     $comando = normalize_bot_command((string) ($context['comando'] ?? ''));
     $payload = flow_context_payload($context);
 
-    $sql = 'SELECT * FROM fluxos WHERE ativo = 1 AND gatilho = ?';
+    $sql = 'SELECT * FROM fluxos WHERE ativo = 1 AND gatilho = ? AND ' . tenant_scope_condition('fluxos');
     $params = [$gatilho];
 
     if (db_has_column('fluxos', 'comando')) {
@@ -1257,11 +1634,9 @@ function disparar_fluxos(string $gatilho, array $context = []): array
             }
 
             $scheduledAt = date('Y-m-d H:i:s', strtotime('+' . $delayMinutes . ' minutes'));
-            db()->prepare(
-                'INSERT INTO fluxo_execucoes
-                 (fluxo_id, etapa_id, usuario_id, gatilho, referencia_tipo, referencia_id, payload_context, status, scheduled_at, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            )->execute([
+            $columns = ['fluxo_id', 'etapa_id', 'usuario_id', 'gatilho', 'referencia_tipo', 'referencia_id', 'payload_context', 'status', 'scheduled_at', 'created_at'];
+            $placeholders = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?'];
+            $params = [
                 (int) $fluxo['id'],
                 (int) $etapa['id'],
                 $usuarioId,
@@ -1272,7 +1647,13 @@ function disparar_fluxos(string $gatilho, array $context = []): array
                 'pendente',
                 $scheduledAt,
                 db_now(),
-            ]);
+            ];
+            tenant_insert_append('fluxo_execucoes', $columns, $placeholders, $params);
+            db()->prepare(
+                'INSERT INTO fluxo_execucoes
+                 (' . implode(', ', $columns) . ')
+                 VALUES (' . implode(', ', $placeholders) . ')'
+            )->execute($params);
             $agendadas++;
         }
     }
@@ -1305,8 +1686,13 @@ function processar_fluxos_pendentes(int $limit = 20): array
     }
 
     $limit = max(1, min(100, $limit));
+    $tenantSelect = db_has_column('fluxo_execucoes', 'tenant_id')
+        ? ', fe.tenant_id AS tenant_id'
+        : (db_has_column('usuarios', 'tenant_id') ? ', u.tenant_id AS tenant_id' : ', NULL AS tenant_id');
+
     $stmt = db()->prepare(
         'SELECT fe.*, u.telegram_id,
+                ' . ltrim($tenantSelect, ',') . ',
                 fl.ativo AS fluxo_ativo,
                 et.ativo AS etapa_ativa, et.mensagem, et.media_tipo, et.media_url,
                 et.botao_tipo, et.botao_texto, et.botao_url, et.botao_produto_id
@@ -1325,9 +1711,13 @@ function processar_fluxos_pendentes(int $limit = 20): array
     $processados = 0;
     $enviados = 0;
     $falhas = 0;
+    $previousTenant = current_tenant();
 
     foreach ($rows as $row) {
         $processados++;
+        if (tenants_enabled() && !empty($row['tenant_id'])) {
+            set_current_tenant_context(get_tenant_by_id((int) $row['tenant_id']));
+        }
 
         if ((int) ($row['fluxo_ativo'] ?? 0) !== 1 || (int) ($row['etapa_ativa'] ?? 0) !== 1) {
             db()->prepare("UPDATE fluxo_execucoes SET status = 'cancelado', last_error = ? WHERE id = ?")
@@ -1358,6 +1748,8 @@ function processar_fluxos_pendentes(int $limit = 20): array
                 ->execute(['Falha ao enviar via Telegram.', (int) $row['id']]);
         }
     }
+
+    set_current_tenant_context($previousTenant);
 
     return [
         'processados' => $processados,
@@ -1519,6 +1911,11 @@ function build_automacao_payload(string $evento, array $payload = [], string $so
         'source' => $source,
         'site_url' => runtime_site_url(),
         'base_url' => runtime_base_url(),
+        'tenant' => current_tenant() ? [
+            'id' => current_tenant_id(),
+            'slug' => current_tenant_slug(),
+            'nome' => current_tenant_name(),
+        ] : null,
         'payload' => $payload,
     ];
 }
@@ -1618,7 +2015,7 @@ function disparar_remarketing_webhooks(string $evento, array $payload = []): int
 
     $stmt = db()->prepare(
         'SELECT * FROM remarketing_webhooks
-         WHERE ativo = 1 AND evento = ?
+         WHERE ativo = 1 AND evento = ? AND ' . tenant_scope_condition('remarketing_webhooks') . '
          ORDER BY ' . db_order_by_clause('remarketing_webhooks')
     );
     $stmt->execute([$evento]);
@@ -1653,12 +2050,20 @@ function log_evento(string $tipo, string $mensagem, array $dados = []): void
     file_put_contents(LOG_FILE, $linha, FILE_APPEND | LOCK_EX);
 
     try {
-        db()->prepare('INSERT INTO logs (tipo, mensagem, dados) VALUES (?, ?, ?)')
-            ->execute([
-                $tipo,
-                $mensagem,
-                $dados ? json_encode($dados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
-            ]);
+        $columns = ['tipo', 'mensagem', 'dados'];
+        $placeholders = ['?', '?', '?'];
+        $params = [
+            $tipo,
+            $mensagem,
+            $dados ? json_encode($dados, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
+        ];
+
+        tenant_insert_append('logs', $columns, $placeholders, $params);
+
+        db()->prepare(
+            'INSERT INTO logs (' . implode(', ', $columns) . ')
+             VALUES (' . implode(', ', $placeholders) . ')'
+        )->execute($params);
     } catch (Throwable $e) {
         // Evita loop de erro ao logar.
     }
@@ -1772,6 +2177,7 @@ function get_fluxos_comando_ativos(): array
         return db()->query(
             'SELECT * FROM fluxos
              WHERE ativo = 1
+               AND ' . tenant_scope_condition('fluxos') . '
                AND gatilho = \'comando\'
                AND comando IS NOT NULL
                AND comando <> \'\'
@@ -2155,7 +2561,7 @@ function upsert_usuario(int $telegramId, string $firstName = '', string $usernam
 {
     $pdo = db();
 
-    $stmt = $pdo->prepare('SELECT * FROM usuarios WHERE telegram_id = ?');
+    $stmt = $pdo->prepare('SELECT * FROM usuarios WHERE telegram_id = ? AND ' . tenant_scope_condition('usuarios'));
     $stmt->execute([$telegramId]);
     $usuario = $stmt->fetch();
 
@@ -2218,7 +2624,7 @@ function upsert_usuario(int $telegramId, string $firstName = '', string $usernam
         }
 
         $params[] = $telegramId;
-        $pdo->prepare('UPDATE usuarios SET ' . implode(', ', $updates) . ' WHERE telegram_id = ?')
+        $pdo->prepare('UPDATE usuarios SET ' . implode(', ', $updates) . ' WHERE telegram_id = ? AND ' . tenant_scope_condition('usuarios'))
             ->execute($params);
 
         $stmt->execute([$telegramId]);
@@ -2248,6 +2654,8 @@ function upsert_usuario(int $telegramId, string $firstName = '', string $usernam
             $params[] = $value;
         }
     }
+
+    tenant_insert_append('usuarios', $columns, $values, $params);
 
     $pdo->prepare(
         'INSERT INTO usuarios (' . implode(', ', $columns) . ')
@@ -2321,7 +2729,7 @@ function get_produtos_ativos(): array
 {
     try {
         $rows = db()->query(
-            'SELECT * FROM produtos WHERE ativo = 1 ORDER BY ' . db_order_by_clause('produtos')
+            'SELECT * FROM produtos WHERE ativo = 1 AND ' . tenant_scope_condition('produtos') . ' ORDER BY ' . db_order_by_clause('produtos')
         )->fetchAll();
     } catch (Throwable $e) {
         $rows = [];
@@ -2350,7 +2758,7 @@ function get_produto_por_id(int $produtoId): ?array
         return get_produtos_ativos()[0] ?? null;
     }
 
-    $stmt = db()->prepare('SELECT * FROM produtos WHERE id = ? LIMIT 1');
+    $stmt = db()->prepare('SELECT * FROM produtos WHERE id = ? AND ' . tenant_scope_condition('produtos') . ' LIMIT 1');
     $stmt->execute([$produtoId]);
     $produto = $stmt->fetch();
     return $produto ?: null;
@@ -2531,9 +2939,9 @@ function get_orderbump_por_id(int $orderbumpId): ?array
                 pb.nome AS produto_nome, pb.valor AS produto_valor, pb.dias_acesso AS produto_dias_acesso, ' .
                 ($hasPackLink ? 'pb.pack_link' : 'NULL') . ' AS produto_pack_link
          FROM orderbumps o
-         LEFT JOIN produtos pm ON pm.id = o.produto_principal_id
-         LEFT JOIN produtos pb ON pb.id = o.produto_id
-         WHERE o.id = ?
+         LEFT JOIN produtos pm ON pm.id = o.produto_principal_id AND ' . tenant_scope_condition('produtos', 'pm') . '
+         LEFT JOIN produtos pb ON pb.id = o.produto_id AND ' . tenant_scope_condition('produtos', 'pb') . '
+         WHERE o.id = ? AND ' . tenant_scope_condition('orderbumps', 'o') . '
          LIMIT 1'
     );
     $stmt->execute([$orderbumpId]);
@@ -2554,9 +2962,9 @@ function get_orderbump_ativo_por_produto(int $produtoId): ?array
                 pb.nome AS produto_nome, pb.valor AS produto_valor, pb.dias_acesso AS produto_dias_acesso, ' .
                 ($hasPackLink ? 'pb.pack_link' : 'NULL') . ' AS produto_pack_link
          FROM orderbumps o
-         LEFT JOIN produtos pm ON pm.id = o.produto_principal_id
-         LEFT JOIN produtos pb ON pb.id = o.produto_id
-         WHERE o.ativo = 1 AND o.produto_principal_id = ?
+         LEFT JOIN produtos pm ON pm.id = o.produto_principal_id AND ' . tenant_scope_condition('produtos', 'pm') . '
+         LEFT JOIN produtos pb ON pb.id = o.produto_id AND ' . tenant_scope_condition('produtos', 'pb') . '
+         WHERE o.ativo = 1 AND o.produto_principal_id = ? AND ' . tenant_scope_condition('orderbumps', 'o') . '
          ORDER BY ' . db_order_by_clause('orderbumps', 'o') . '
          LIMIT 1'
     );
@@ -2744,9 +3152,10 @@ function get_downsells_ativos(): array
                     ($hasTipoProduto ? 'p.tipo' : "'grupo'") . ' AS produto_tipo, ' .
                     ($hasPackLink ? 'p.pack_link' : 'NULL') . ' AS produto_pack_link, p.dias_acesso AS produto_dias_acesso
              FROM downsells d
-             LEFT JOIN funis f ON f.id = d.funil_id
-             LEFT JOIN produtos p ON p.id = d.produto_id
+             LEFT JOIN funis f ON f.id = d.funil_id AND ' . tenant_scope_condition('funis', 'f') . '
+             LEFT JOIN produtos p ON p.id = d.produto_id AND ' . tenant_scope_condition('produtos', 'p') . '
              WHERE d.ativo = 1
+               AND ' . tenant_scope_condition('downsells', 'd') . '
              ORDER BY d.id ASC'
         )->fetchAll();
     } catch (Throwable $e) {
@@ -2768,9 +3177,9 @@ function get_downsell_por_id(int $downsellId): ?array
                 ($hasTipoProduto ? 'p.tipo' : "'grupo'") . ' AS produto_tipo, ' .
                 ($hasPackLink ? 'p.pack_link' : 'NULL') . ' AS produto_pack_link, p.dias_acesso AS produto_dias_acesso
          FROM downsells d
-         LEFT JOIN funis f ON f.id = d.funil_id
-         LEFT JOIN produtos p ON p.id = d.produto_id
-         WHERE d.id = ?
+         LEFT JOIN funis f ON f.id = d.funil_id AND ' . tenant_scope_condition('funis', 'f') . '
+         LEFT JOIN produtos p ON p.id = d.produto_id AND ' . tenant_scope_condition('produtos', 'p') . '
+         WHERE d.id = ? AND ' . tenant_scope_condition('downsells', 'd') . '
          LIMIT 1'
     );
     $stmt->execute([$downsellId]);
@@ -2919,6 +3328,8 @@ function criar_pagamento(
     $placeholders[] = '?';
     $params[] = $qrImg;
 
+    tenant_insert_append('pagamentos', $columns, $placeholders, $params);
+
     db()->prepare(
         'INSERT INTO pagamentos (' . implode(', ', $columns) . ')
          VALUES (' . implode(', ', $placeholders) . ')'
@@ -2929,7 +3340,7 @@ function criar_pagamento(
 
 function confirmar_pagamento(string $txid): ?array
 {
-    $stmt = db()->prepare('SELECT * FROM pagamentos WHERE txid = ? LIMIT 1');
+    $stmt = db()->prepare('SELECT * FROM pagamentos WHERE txid = ? AND ' . tenant_scope_condition('pagamentos') . ' LIMIT 1');
     $stmt->execute([$txid]);
     $pagamento = $stmt->fetch();
 
@@ -2943,7 +3354,7 @@ function confirmar_pagamento(string $txid): ?array
     }
 
     if ($pagamento['status'] === 'pendente') {
-        db()->prepare("UPDATE pagamentos SET status = 'pago', paid_at = ? WHERE txid = ?")
+        db()->prepare("UPDATE pagamentos SET status = 'pago', paid_at = ? WHERE txid = ? AND " . tenant_scope_condition('pagamentos'))
             ->execute([db_now(), $txid]);
 
         $stmt->execute([$txid]);
@@ -2956,7 +3367,8 @@ function confirmar_pagamento(string $txid): ?array
 
 function ecompag_request(string $method, string $path, array $data = []): array
 {
-    $url = ECOMPAG_API_BASE . $path;
+    $method = strtoupper(trim($method));
+    $url = PESTOPAY_API_BASE . '/' . ltrim($path, '/');
     if ($method === 'GET' && $data) {
         $url .= '?' . http_build_query($data);
     }
@@ -2965,13 +3377,19 @@ function ecompag_request(string $method, string $path, array $data = []): array
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-    $headers = ['Accept: application/json'];
+    $headers = [
+        'Accept: application/json',
+        'X-Public-Key: ' . runtime_pestopay_public_key(),
+        'X-Secret-Key: ' . runtime_pestopay_secret_key(),
+    ];
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
-    if ($method === 'POST') {
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, array_merge($headers, ['Content-Type: application/x-www-form-urlencoded']));
+    if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+        if ($data !== []) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        }
+        curl_setopt($ch, CURLOPT_HTTPHEADER, array_merge($headers, ['Content-Type: application/json']));
     }
 
     $response = curl_exec($ch);
@@ -2980,13 +3398,13 @@ function ecompag_request(string $method, string $path, array $data = []): array
     curl_close($ch);
 
     if ($error) {
-        log_evento('ecompag_curl_error', $error, ['path' => $path, 'url' => $url]);
+        log_evento('pestopay_curl_error', $error, ['path' => $path, 'url' => $url]);
         return ['ok' => false, 'http_code' => 0, 'data' => null];
     }
 
     $decoded = json_decode((string) $response, true);
     if (json_last_error() !== JSON_ERROR_NONE) {
-        log_evento('ecompag_resposta_invalida', 'Resposta da Ecompag nao era JSON valido', [
+        log_evento('pestopay_resposta_invalida', 'Resposta da PestoPay nao era JSON valido', [
             'path' => $path,
             'http_code' => $httpCode,
             'response' => substr((string) $response, 0, 2000),
@@ -2995,7 +3413,7 @@ function ecompag_request(string $method, string $path, array $data = []): array
     }
 
     if ($httpCode !== 200 && $httpCode !== 201) {
-        log_evento('ecompag_http_error', 'Falha na API da Ecompag', [
+        log_evento('pestopay_http_error', 'Falha na API da PestoPay', [
             'path' => $path,
             'http_code' => $httpCode,
             'response' => substr((string) $response, 0, 2000),
@@ -3006,6 +3424,70 @@ function ecompag_request(string $method, string $path, array $data = []): array
         'ok' => $httpCode === 200 || $httpCode === 201,
         'http_code' => $httpCode,
         'data' => $decoded,
+    ];
+}
+
+function pestopay_gateway_email(array $usuario): string
+{
+    $email = trim((string) ($usuario['email'] ?? ''));
+    if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return strtolower($email);
+    }
+
+    $host = (string) parse_url(runtime_site_url(), PHP_URL_HOST);
+    $host = preg_replace('/^www\./i', '', trim($host));
+    if ($host === '' || strpos($host, '.') === false) {
+        $host = 'example.com';
+    }
+
+    $identifier = (int) ($usuario['telegram_id'] ?? $usuario['id'] ?? 0);
+    if ($identifier <= 0) {
+        $identifier = random_int(1000, 999999);
+    }
+
+    return 'telegram+' . $identifier . '@' . $host;
+}
+
+function pestopay_extract_pix_response(array $data): array
+{
+    $pix = is_array($data['pix'] ?? null) ? $data['pix'] : [];
+    $transaction = is_array($data['transaction'] ?? null) ? $data['transaction'] : [];
+    $pixInformation = is_array($transaction['pixInformation'] ?? null) ? $transaction['pixInformation'] : [];
+
+    $transactionId = (string) (
+        $data['transactionId']
+        ?? $transaction['id']
+        ?? $pix['transactionId']
+        ?? $pixInformation['transactionId']
+        ?? ''
+    );
+
+    $qrCode = (string) (
+        $pix['code']
+        ?? $pix['qrCode']
+        ?? $pix['copyAndPaste']
+        ?? $pixInformation['code']
+        ?? $pixInformation['qrCode']
+        ?? $data['qrcode']
+        ?? $data['qrCode']
+        ?? $data['pixCode']
+        ?? ''
+    );
+
+    $qrImg = (string) (
+        $pix['qrCodeImage']
+        ?? $pix['image']
+        ?? $pixInformation['qrCodeImage']
+        ?? $data['imagemQrcode']
+        ?? $data['qrCodeImage']
+        ?? ''
+    );
+
+    return [
+        'transaction_id' => trim($transactionId),
+        'qr_code' => trim($qrCode),
+        'qr_img' => trim($qrImg),
+        'token' => trim((string) ($data['token'] ?? '')),
     ];
 }
 
@@ -3027,29 +3509,41 @@ function gerar_pix_para_usuario(array $usuario, array $produto, ?int $funilId = 
         $produtoNome = 'Produto';
     }
 
-    $descricao = texto_ascii_seguro(sprintf('%s | Telegram %s', $produtoNome, $usuario['telegram_id']), 120);
-    if ($descricao === '') {
-        $descricao = 'Telegram ' . (string) (int) $usuario['telegram_id'];
-    }
+    $valor = round((float) ($produto['valor'] ?? 0), 2);
+    $identifier = sprintf(
+        'tg-%s-u%s-%s',
+        current_tenant_slug() !== '' ? current_tenant_slug() : 'default',
+        (int) ($usuario['id'] ?? 0),
+        substr(bin2hex(random_bytes(6)), 0, 12)
+    );
 
-    $response = ecompag_request('POST', '/pix/qrcode.php', [
-        'client_id' => runtime_ecompag_client_id(),
-        'client_secret' => runtime_ecompag_client_secret(),
-        'nome' => $nomePagador,
-        'cpf' => $cpf,
-        'valor' => number_format((float) $produto['valor'], 2, '.', ''),
-        'descricao' => $descricao,
-        'urlnoty' => runtime_ecompag_notify_url(),
+    $response = ecompag_request('POST', '/gateway/pix/receive', [
+        'identifier' => $identifier,
+        'amount' => $valor,
+        'callbackUrl' => runtime_ecompag_notify_url(),
+        'client' => [
+            'name' => $nomePagador,
+            'email' => pestopay_gateway_email($usuario),
+            'cpf' => $cpf,
+        ],
+        'products' => [[
+            'id' => (string) (isset($produto['id']) ? (int) $produto['id'] : 'default'),
+            'name' => $produtoNome,
+            'quantity' => 1,
+            'price' => $valor,
+            'externalId' => (string) (isset($produto['id']) ? (int) $produto['id'] : 'default'),
+        ]],
     ]);
 
-    $data = $response['data'] ?? [];
-    if (!$response['ok'] || empty($data['qrcode']) || empty($data['transactionId'])) {
+    $data = is_array($response['data'] ?? null) ? $response['data'] : [];
+    $pixPayload = pestopay_extract_pix_response($data);
+    if (!$response['ok'] || $pixPayload['qr_code'] === '' || $pixPayload['transaction_id'] === '') {
         log_evento('pix_geracao_falhou', 'Não foi possível gerar QR Code', [
             'response' => $data,
             'usuario_id' => (int) ($usuario['id'] ?? 0),
             'produto_id' => isset($produto['id']) ? (int) $produto['id'] : null,
             'produto_nome' => (string) ($produto['nome'] ?? ''),
-            'valor' => (float) ($produto['valor'] ?? 0),
+            'valor' => $valor,
             'tipo_oferta' => $tipoOferta,
             'extras' => $extras,
         ]);
@@ -3059,41 +3553,45 @@ function gerar_pix_para_usuario(array $usuario, array $produto, ?int $funilId = 
     criar_pagamento(
         (int) $usuario['id'],
         isset($produto['id']) ? (int) $produto['id'] : null,
-        $data['transactionId'],
-        (float) $produto['valor'],
-        (string) $data['qrcode'],
-        (string) ($data['imagemQrcode'] ?? ''),
+        $pixPayload['transaction_id'],
+        $valor,
+        $pixPayload['qr_code'],
+        $pixPayload['qr_img'],
         $funilId,
         $tipoOferta,
         $extras
     );
 
+    if ($pixPayload['token'] !== '' && !hash_equals(runtime_pestopay_webhook_token(), $pixPayload['token'])) {
+        app_setting_save('pestopay_webhook_token', $pixPayload['token']);
+    }
+
     meta_send_event('InitiateCheckout', $usuario, [
         'currency' => 'BRL',
-        'value' => (float) $produto['valor'],
+        'value' => $valor,
         'content_name' => (string) ($produto['nome'] ?? runtime_default_product_name()),
         'content_type' => 'product',
         'content_ids' => [isset($produto['id']) ? (string) (int) $produto['id'] : 'default'],
         'contents' => [[
             'id' => isset($produto['id']) ? (string) (int) $produto['id'] : 'default',
             'quantity' => 1,
-            'item_price' => (float) $produto['valor'],
+            'item_price' => $valor,
         ]],
-        'order_id' => (string) $data['transactionId'],
+        'order_id' => $pixPayload['transaction_id'],
     ], [
-        'event_id' => 'initiate_checkout_' . (string) $data['transactionId'],
+        'event_id' => 'initiate_checkout_' . $pixPayload['transaction_id'],
     ]);
 
     disparar_fluxos('pix_gerado', [
         'usuario' => $usuario,
         'produto' => $produto,
         'pix' => [
-            'txid' => (string) $data['transactionId'],
-            'qr_code' => (string) $data['qrcode'],
+            'txid' => $pixPayload['transaction_id'],
+            'qr_code' => $pixPayload['qr_code'],
         ],
         'pagamento' => [
-            'txid' => (string) $data['transactionId'],
-            'valor' => (float) $produto['valor'],
+            'txid' => $pixPayload['transaction_id'],
+            'valor' => $valor,
             'funil_id' => $funilId,
             'tipo_oferta' => $tipoOferta,
             'orderbump_id' => isset($extras['orderbump_id']) ? (int) $extras['orderbump_id'] : null,
@@ -3104,50 +3602,50 @@ function gerar_pix_para_usuario(array $usuario, array $produto, ?int $funilId = 
         'usuario' => $usuario,
         'produto' => $produto,
         'pagamento' => [
-            'txid' => (string) $data['transactionId'],
-            'valor' => (float) $produto['valor'],
+            'txid' => $pixPayload['transaction_id'],
+            'valor' => $valor,
             'funil_id' => $funilId,
             'tipo_oferta' => $tipoOferta,
             'orderbump_id' => isset($extras['orderbump_id']) ? (int) $extras['orderbump_id'] : null,
         ],
         'pix' => [
-            'qr_code' => (string) $data['qrcode'],
-            'qr_img' => (string) ($data['imagemQrcode'] ?? ''),
+            'qr_code' => $pixPayload['qr_code'],
+            'qr_img' => $pixPayload['qr_img'],
         ],
     ]);
     disparar_remarketing_webhooks('pix_gerado', [
         'usuario' => $usuario,
         'produto' => $produto,
         'pagamento' => [
-            'txid' => (string) $data['transactionId'],
-            'valor' => (float) $produto['valor'],
+            'txid' => $pixPayload['transaction_id'],
+            'valor' => $valor,
             'funil_id' => $funilId,
             'tipo_oferta' => $tipoOferta,
             'orderbump_id' => isset($extras['orderbump_id']) ? (int) $extras['orderbump_id'] : null,
         ],
         'pix' => [
-            'qr_code' => (string) $data['qrcode'],
-            'qr_img' => (string) ($data['imagemQrcode'] ?? ''),
+            'qr_code' => $pixPayload['qr_code'],
+            'qr_img' => $pixPayload['qr_img'],
         ],
     ]);
 
     return [
-        'txid' => (string) $data['transactionId'],
-        'qr_code' => (string) $data['qrcode'],
-        'qr_img' => (string) ($data['imagemQrcode'] ?? ''),
-        'valor' => (float) $produto['valor'],
+        'txid' => $pixPayload['transaction_id'],
+        'qr_code' => $pixPayload['qr_code'],
+        'qr_img' => $pixPayload['qr_img'],
+        'valor' => $valor,
         'produto' => $produto,
     ];
 }
 
 function consultar_status_pix(string $transactionId): ?array
 {
-    $response = ecompag_request('GET', '/pix/status.php', [
-        'client_id' => runtime_ecompag_client_id(),
-        'client_secret' => runtime_ecompag_client_secret(),
-        'transaction_id' => $transactionId,
-    ]);
+    $transactionId = trim($transactionId);
+    if ($transactionId === '') {
+        return null;
+    }
 
+    $response = ecompag_request('GET', '/gateway/transactions/' . rawurlencode($transactionId));
     return $response['ok'] ? ($response['data'] ?? null) : null;
 }
 
@@ -3240,9 +3738,10 @@ function get_funis_ativos(): array
                     p.nome AS produto_principal_nome, p.valor AS produto_principal_valor,
                     u.nome AS upsell_produto_nome, u.valor AS upsell_produto_valor
              FROM funis f
-             LEFT JOIN produtos p ON p.id = f.produto_principal_id
-             LEFT JOIN produtos u ON u.id = f.upsell_produto_id
+             LEFT JOIN produtos p ON p.id = f.produto_principal_id AND ' . tenant_scope_condition('produtos', 'p') . '
+             LEFT JOIN produtos u ON u.id = f.upsell_produto_id AND ' . tenant_scope_condition('produtos', 'u') . '
              WHERE f.ativo = 1
+               AND ' . tenant_scope_condition('funis', 'f') . '
              ORDER BY ' . db_order_by_clause('funis', 'f')
         )->fetchAll();
     } catch (Throwable $e) {
@@ -3261,9 +3760,9 @@ function get_funil_por_id(int $funilId): ?array
                 p.nome AS produto_principal_nome, p.valor AS produto_principal_valor, p.dias_acesso AS produto_principal_dias,
                 u.nome AS upsell_produto_nome, u.valor AS upsell_produto_valor, u.dias_acesso AS upsell_produto_dias
          FROM funis f
-         LEFT JOIN produtos p ON p.id = f.produto_principal_id
-         LEFT JOIN produtos u ON u.id = f.upsell_produto_id
-         WHERE f.id = ?
+         LEFT JOIN produtos p ON p.id = f.produto_principal_id AND ' . tenant_scope_condition('produtos', 'p') . '
+         LEFT JOIN produtos u ON u.id = f.upsell_produto_id AND ' . tenant_scope_condition('produtos', 'u') . '
+         WHERE f.id = ? AND ' . tenant_scope_condition('funis', 'f') . '
          LIMIT 1'
     );
     $stmt->execute([$funilId]);
@@ -3480,10 +3979,16 @@ function processar_mailings_pendentes(int $limit = 20): array
     }
 
     $limit = max(1, min(100, $limit));
+    $tenantSelect = db_has_column('mailing_envios', 'tenant_id')
+        ? ', me.tenant_id AS tenant_id'
+        : (db_has_column('mailings', 'tenant_id')
+            ? ', m.tenant_id AS tenant_id'
+            : (db_has_column('usuarios', 'tenant_id') ? ', u.tenant_id AS tenant_id' : ', NULL AS tenant_id'));
+
     $stmt = db()->prepare(
         'SELECT me.id, me.mailing_id, me.usuario_id, me.tentativas,
                 m.nome, m.mensagem, m.media_tipo, m.media_url, m.botao_texto, m.botao_url, m.status AS mailing_status,
-                u.telegram_id
+                u.telegram_id' . $tenantSelect . '
          FROM mailing_envios me
          JOIN mailings m ON m.id = me.mailing_id
          JOIN usuarios u ON u.id = me.usuario_id
@@ -3498,10 +4003,14 @@ function processar_mailings_pendentes(int $limit = 20): array
     $enviados = 0;
     $falhas = 0;
     $mailingsAfetados = [];
+    $previousTenant = current_tenant();
 
     foreach ($rows as $row) {
         $processados++;
         $mailingsAfetados[(int) $row['mailing_id']] = true;
+        if (tenants_enabled() && !empty($row['tenant_id'])) {
+            set_current_tenant_context(get_tenant_by_id((int) $row['tenant_id']));
+        }
 
         if (($row['mailing_status'] ?? '') === 'pendente') {
             db()->prepare("UPDATE mailings SET status = 'processando', started_at = COALESCE(started_at, ?) WHERE id = ?")
@@ -3548,6 +4057,8 @@ function processar_mailings_pendentes(int $limit = 20): array
         atualizar_estatisticas_mailing((int) $mailingId);
     }
 
+    set_current_tenant_context($previousTenant);
+
     return [
         'processados' => $processados,
         'enviados' => $enviados,
@@ -3569,10 +4080,14 @@ function processar_downsells_pendentes(int $limit = 20): array
         ? "p.created_at <= (CURRENT_TIMESTAMP - ((d.delay_minutes)::text || ' minutes')::interval)"
         : 'TIMESTAMPDIFF(MINUTE, p.created_at, NOW()) >= d.delay_minutes';
 
+    $tenantSelect = db_has_column('downsells', 'tenant_id')
+        ? ', d.tenant_id AS tenant_id'
+        : (db_has_column('pagamentos', 'tenant_id') ? ', p.tenant_id AS tenant_id' : ', NULL AS tenant_id');
+
     $stmt = db()->prepare(
         'SELECT d.*,
                 p.id AS pagamento_id, p.usuario_id, p.txid, p.created_at AS pagamento_criado_em,
-                u.telegram_id, u.first_name,
+                u.telegram_id, u.first_name' . $tenantSelect . ',
                 pr.nome AS produto_nome, pr.valor AS produto_valor, ' .
                 ($hasTipoProduto ? 'pr.tipo' : "'grupo' AS tipo") . ', ' .
                 ($hasPackLink ? 'pr.pack_link' : 'NULL AS pack_link') . '
@@ -3595,9 +4110,13 @@ function processar_downsells_pendentes(int $limit = 20): array
     $processados = 0;
     $enviados = 0;
     $falhas = 0;
+    $previousTenant = current_tenant();
 
     foreach ($rows as $row) {
         $processados++;
+        if (tenants_enabled() && !empty($row['tenant_id'])) {
+            set_current_tenant_context(get_tenant_by_id((int) $row['tenant_id']));
+        }
 
         $ok = enviar_oferta_downsell((int) $row['telegram_id'], $row, [
             'nome' => htmlspecialchars((string) ($row['first_name'] ?? 'Cliente'), ENT_QUOTES, 'UTF-8'),
@@ -3605,17 +4124,21 @@ function processar_downsells_pendentes(int $limit = 20): array
 
         try {
             $sentAt = db_now();
-            db()->prepare(
-                'INSERT INTO downsell_disparos (downsell_id, pagamento_id, usuario_id, status, sent_at, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)'
-            )->execute([
+            $columns = ['downsell_id', 'pagamento_id', 'usuario_id', 'status', 'sent_at', 'created_at'];
+            $placeholders = ['?', '?', '?', '?', '?', '?'];
+            $params = [
                 (int) $row['id'],
                 (int) $row['pagamento_id'],
                 (int) $row['usuario_id'],
                 $ok ? 'enviado' : 'falhou',
                 $sentAt,
                 $sentAt,
-            ]);
+            ];
+            tenant_insert_append('downsell_disparos', $columns, $placeholders, $params);
+            db()->prepare(
+                'INSERT INTO downsell_disparos (' . implode(', ', $columns) . ')
+                 VALUES (' . implode(', ', $placeholders) . ')'
+            )->execute($params);
         } catch (Throwable $e) {
             continue;
         }
@@ -3626,6 +4149,8 @@ function processar_downsells_pendentes(int $limit = 20): array
             $falhas++;
         }
     }
+
+    set_current_tenant_context($previousTenant);
 
     return [
         'processados' => $processados,
