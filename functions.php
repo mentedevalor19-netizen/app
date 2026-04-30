@@ -584,6 +584,11 @@ function runtime_fixed_checkout_name(): string
     return trim((string) app_setting('checkout_fixed_name', ''));
 }
 
+function runtime_fixed_checkout_phone(): string
+{
+    return preg_replace('/\D+/', '', (string) app_setting('checkout_fixed_phone', '')) ?: '';
+}
+
 function runtime_checkout_uses_backend_payer(): bool
 {
     $cpf = runtime_fixed_checkout_cpf();
@@ -621,6 +626,106 @@ function runtime_effective_checkout_name(array $usuario = []): string
     }
 
     return 'Cliente Telegram';
+}
+
+function runtime_effective_checkout_phone(array $usuario = []): string
+{
+    $candidates = [];
+
+    $fixedPhone = runtime_fixed_checkout_phone();
+    if ($fixedPhone !== '') {
+        $candidates[] = $fixedPhone;
+    }
+
+    foreach (['phone', 'telefone', 'celular', 'whatsapp', 'mobile'] as $key) {
+        $value = preg_replace('/\D+/', '', (string) ($usuario[$key] ?? '')) ?: '';
+        if ($value !== '') {
+            $candidates[] = $value;
+        }
+    }
+
+    foreach ($candidates as $digits) {
+        $digits = preg_replace('/\D+/', '', (string) $digits) ?: '';
+        if ((strlen($digits) === 12 || strlen($digits) === 13) && str_starts_with($digits, '55')) {
+            $digits = substr($digits, 2);
+        }
+
+        if (strlen($digits) === 10 || strlen($digits) === 11) {
+            return $digits;
+        }
+    }
+
+    return '';
+}
+
+function pestopay_format_phone(string $phone): string
+{
+    $digits = preg_replace('/\D+/', '', $phone) ?: '';
+    if ((strlen($digits) === 12 || strlen($digits) === 13) && str_starts_with($digits, '55')) {
+        $digits = substr($digits, 2);
+    }
+
+    if (strlen($digits) === 11) {
+        return sprintf('(%s) %s-%s', substr($digits, 0, 2), substr($digits, 2, 5), substr($digits, 7, 4));
+    }
+
+    if (strlen($digits) === 10) {
+        return sprintf('(%s) %s-%s', substr($digits, 0, 2), substr($digits, 2, 4), substr($digits, 6, 4));
+    }
+
+    return '';
+}
+
+function runtime_pestopay_checkout_phone(array $usuario = []): string
+{
+    return pestopay_format_phone(runtime_effective_checkout_phone($usuario));
+}
+
+function runtime_pestopay_checkout_ready(array $usuario = []): bool
+{
+    return preg_match('/^\d{11}$/', runtime_effective_checkout_cpf($usuario)) === 1
+        && runtime_pestopay_checkout_phone($usuario) !== '';
+}
+
+function runtime_ui_text(string $key, string $default): string
+{
+    $value = trim((string) app_setting($key, $default));
+    return $value !== '' ? $value : $default;
+}
+
+function runtime_start_plan_button_text(): string
+{
+    return runtime_ui_text('start_button_planos_text', 'Ver planos');
+}
+
+function runtime_start_pack_button_text(): string
+{
+    return runtime_ui_text('start_button_packs_text', 'Ver packs');
+}
+
+function runtime_pack_back_button_text(): string
+{
+    return runtime_ui_text('packs_back_button_text', 'Voltar ao menu principal');
+}
+
+function runtime_orderbump_accept_button_text(): string
+{
+    return runtime_ui_text('orderbump_accept_button_text', 'Adicionar ao pedido');
+}
+
+function runtime_orderbump_skip_button_text(): string
+{
+    return runtime_ui_text('orderbump_skip_button_text', 'Continuar sem');
+}
+
+function runtime_upsell_button_text(): string
+{
+    return runtime_ui_text('upsell_button_text', 'Quero a oferta');
+}
+
+function runtime_downsell_button_text(): string
+{
+    return runtime_ui_text('downsell_button_text', 'Quero esta opcao');
 }
 
 function texto_ascii_seguro(string $texto, int $maxLength = 0): string
@@ -1206,7 +1311,7 @@ function template_default(string $key): string
         'msg_cpf_saved' => "CPF salvo com sucesso.",
         'msg_cpf_invalid' => "Esse CPF parece inválido. Envie novamente com 11 números.",
         'msg_pix_generating' => "Gerando seu Pix para <b>{produto}</b>. Aguarde alguns segundos.",
-        'msg_pix_error' => "Nao consegui gerar o Pix agora. Verifique se o CPF fixo do checkout tem 11 numeros e se as credenciais da PestoPay estao corretas.",
+        'msg_pix_error' => "Nao consegui gerar o Pix agora. Verifique se o CPF e o telefone fixos do checkout estao corretos e se as credenciais da PestoPay estao validas.",
         'msg_pix_generated' => "<b>Pix gerado com sucesso</b>\n\nPlano: <b>{produto}</b>\nValor: <b>{valor}</b>\nTXID: <code>{txid}</code>\n\n<b>Copia e cola</b>\n<code>{pix}</code>\n\nApós o pagamento, o bot envia seu convite automaticamente.",
         'msg_payment_confirmed' => "Pagamento confirmado.\n\nOlá, <b>{nome}</b>.\nPlano: <b>{produto}</b>\nAcesso liberado até <b>{expira}</b>.\n\nEntre no grupo pelo link abaixo:\n{convite}\n\nEsse link é individual e expira em 1 hora.",
         'msg_payment_confirmed_no_invite' => "Pagamento confirmado.\n\nOlá, <b>{nome}</b>.\nSeu acesso já foi liberado até <b>{expira}</b>, mas houve falha ao gerar o convite automático.\nEntre em contato com o suporte para receber o link.",
@@ -1241,7 +1346,7 @@ function template_default_runtime(string $key): string
         'msg_cpf_saved' => "CPF salvo com sucesso.",
         'msg_cpf_invalid' => "Esse CPF parece invalido. Envie novamente com 11 numeros.",
         'msg_pix_generating' => "Gerando seu Pix para <b>{produto}</b>. Aguarde alguns segundos.",
-        'msg_pix_error' => "Nao consegui gerar o Pix agora. Verifique se o CPF fixo do checkout tem 11 numeros e se as credenciais da PestoPay estao corretas.",
+        'msg_pix_error' => "Nao consegui gerar o Pix agora. Verifique se o CPF e o telefone fixos do checkout estao corretos e se as credenciais da PestoPay estao validas.",
         'msg_pix_generated' => "<b>Pix gerado com sucesso</b>\n\nProduto: <b>{produto}</b>\nValor: <b>{valor}</b>\nTXID: <code>{txid}</code>\n\n<b>Copia e cola</b>\n<code>{pix}</code>\n\nApos o pagamento, o bot libera seu acesso ou envia o link automaticamente.",
         'msg_payment_confirmed' => "Pagamento confirmado.\n\nOla, <b>{nome}</b>.\nPlano: <b>{produto}</b>\nAcesso liberado ate <b>{expira}</b>.\n\nEntre no grupo pelo link abaixo:\n{convite}\n\nEsse link e individual e expira em 1 hora.",
         'msg_payment_confirmed_no_invite' => "Pagamento confirmado.\n\nOla, <b>{nome}</b>.\nSeu acesso ja foi liberado ate <b>{expira}</b>, mas houve falha ao gerar o convite automatico.\nEntre em contato com o suporte para receber o link.",
@@ -1485,14 +1590,14 @@ function flow_step_reply_markup(array $etapa): ?string
 
     if ($tipo === 'planos') {
         $botao = [
-            'text' => $texto !== '' ? $texto : 'Ver planos',
+            'text' => $texto !== '' ? $texto : runtime_start_plan_button_text(),
             'callback_data' => 'menu_catalogo',
         ];
     }
 
     if ($tipo === 'packs') {
         $botao = [
-            'text' => $texto !== '' ? $texto : 'Ver packs',
+            'text' => $texto !== '' ? $texto : runtime_start_pack_button_text(),
             'callback_data' => 'menu_packs',
         ];
     }
@@ -1993,10 +2098,32 @@ function disparar_n8n_evento(string $evento, array $payload = []): bool
     );
 }
 
+function usuario_ja_virou_cliente(array $usuario): bool
+{
+    if (($usuario['status'] ?? '') === 'ativo') {
+        return true;
+    }
+
+    $usuarioId = (int) ($usuario['id'] ?? 0);
+    if ($usuarioId <= 0 || !db_has_table('pagamentos')) {
+        return false;
+    }
+
+    $stmt = db()->prepare(
+        "SELECT COUNT(*) FROM pagamentos
+         WHERE usuario_id = ?
+           AND status = 'pago'
+           AND " . tenant_scope_condition('pagamentos')
+    );
+    $stmt->execute([$usuarioId]);
+
+    return (int) $stmt->fetchColumn() > 0;
+}
+
 function remarketing_event_options(): array
 {
     return [
-        'lead_start' => 'Lead iniciou no /start',
+        'lead_start' => 'Lead iniciou no /start (nao cliente)',
         'pix_gerado' => 'Pix gerado',
         'pagamento_aprovado' => 'Pagamento aprovado',
         'pack_entregue' => 'Pack entregue',
@@ -2010,6 +2137,9 @@ function remarketing_event_options(): array
 function disparar_remarketing_webhooks(string $evento, array $payload = []): int
 {
     if (!db_has_table('remarketing_webhooks')) {
+        log_evento('remarketing_sem_tabela', 'Tabela de remarketing nao encontrada para disparo.', [
+            'event' => $evento,
+        ]);
         return 0;
     }
 
@@ -2020,6 +2150,14 @@ function disparar_remarketing_webhooks(string $evento, array $payload = []): int
     );
     $stmt->execute([$evento]);
     $webhooks = $stmt->fetchAll();
+
+    if (!$webhooks) {
+        log_evento('remarketing_sem_regras', 'Nenhuma regra ativa de remarketing encontrada para o evento.', [
+            'event' => $evento,
+            'tenant' => current_tenant_slug(),
+        ]);
+        return 0;
+    }
 
     $sent = 0;
     foreach ($webhooks as $webhook) {
@@ -2033,6 +2171,13 @@ function disparar_remarketing_webhooks(string $evento, array $payload = []): int
             $sent++;
         }
     }
+
+    log_evento('remarketing_disparo', 'Disparo de remarketing processado.', [
+        'event' => $evento,
+        'tenant' => current_tenant_slug(),
+        'rules' => count($webhooks),
+        'sent' => $sent,
+    ]);
 
     return $sent;
 }
@@ -2419,6 +2564,16 @@ function baixar_arquivo_temporario(string $url, string $prefix = 'tg_'): ?array
     ];
 }
 
+function telegram_media_upload_filename(string $mediaTipo, string $filename): string
+{
+    $filename = trim($filename);
+    if ($mediaTipo === 'voice') {
+        return 'audio.ogg';
+    }
+
+    return $filename !== '' ? $filename : 'arquivo';
+}
+
 function enviar_midia_telegram(int $chatId, string $mediaTipo, string $mediaUrl, string $caption = '', array $extra = []): ?array
 {
     $mediaTipo = telegram_media_tipo_resolvido($mediaTipo, $mediaUrl);
@@ -2451,7 +2606,7 @@ function enviar_midia_telegram(int $chatId, string $mediaTipo, string $mediaUrl,
         $payload[$mediaField] = new CURLFile(
             $download['path'],
             (string) $download['content_type'],
-            (string) $download['filename']
+            telegram_media_upload_filename($mediaTipo, (string) $download['filename'])
         );
 
         return telegram_request_multipart($method, $payload);
@@ -2474,6 +2629,11 @@ function enviar_conteudo_telegram(int $chatId, string $texto, ?string $mediaTipo
 
 function enviar_qrcode_imagem(int $chatId, string $base64): bool
 {
+    $base64 = trim($base64);
+    if (preg_match('/^data:image\/[a-z0-9.+-]+;base64,/i', $base64) === 1) {
+        $base64 = preg_replace('/^data:image\/[a-z0-9.+-]+;base64,/i', '', $base64) ?? $base64;
+    }
+
     $imageData = base64_decode($base64, true);
     if ($imageData === false) {
         return false;
@@ -3015,10 +3175,10 @@ function enviar_oferta_orderbump(int $chatId, array $orderbump, array $vars = []
         'reply_markup' => json_encode([
             'inline_keyboard' => [
                 [
-                    ['text' => 'Adicionar ao pedido', 'callback_data' => 'orderbump:aceitar:' . (int) $orderbump['id']],
+                    ['text' => runtime_orderbump_accept_button_text(), 'callback_data' => 'orderbump:aceitar:' . (int) $orderbump['id']],
                 ],
                 [
-                    ['text' => 'Continuar sem', 'callback_data' => 'orderbump:recusar:' . (int) $orderbump['id']],
+                    ['text' => runtime_orderbump_skip_button_text(), 'callback_data' => 'orderbump:recusar:' . (int) $orderbump['id']],
                 ],
             ],
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -3220,7 +3380,7 @@ function enviar_oferta_downsell(int $chatId, array $downsell, array $vars = []):
     $extra = [
         'reply_markup' => json_encode([
             'inline_keyboard' => [[
-                ['text' => 'Quero essa opcao', 'callback_data' => 'downsell:' . (int) $downsell['id']],
+                ['text' => runtime_downsell_button_text(), 'callback_data' => 'downsell:' . (int) $downsell['id']],
             ]],
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
     ];
@@ -3416,6 +3576,7 @@ function ecompag_request(string $method, string $path, array $data = []): array
         log_evento('pestopay_http_error', 'Falha na API da PestoPay', [
             'path' => $path,
             'http_code' => $httpCode,
+            'request' => $data,
             'response' => substr((string) $response, 0, 2000),
         ]);
     }
@@ -3476,9 +3637,12 @@ function pestopay_extract_pix_response(array $data): array
 
     $qrImg = (string) (
         $pix['qrCodeImage']
+        ?? $pix['base64']
         ?? $pix['image']
         ?? $pixInformation['qrCodeImage']
+        ?? $pixInformation['base64']
         ?? $data['imagemQrcode']
+        ?? $data['base64']
         ?? $data['qrCodeImage']
         ?? ''
     );
@@ -3496,6 +3660,14 @@ function gerar_pix_para_usuario(array $usuario, array $produto, ?int $funilId = 
     $cpf = runtime_effective_checkout_cpf($usuario);
     if (preg_match('/^\d{11}$/', $cpf) !== 1) {
         log_evento('pix_sem_cpf', 'Tentativa de gerar PIX sem CPF de checkout configurado', ['usuario_id' => $usuario['id']]);
+        return null;
+    }
+
+    $telefonePagador = runtime_pestopay_checkout_phone($usuario);
+    if ($telefonePagador === '') {
+        log_evento('pix_sem_telefone', 'Tentativa de gerar PIX sem telefone valido para a PestoPay.', [
+            'usuario_id' => (int) ($usuario['id'] ?? 0),
+        ]);
         return null;
     }
 
@@ -3524,7 +3696,8 @@ function gerar_pix_para_usuario(array $usuario, array $produto, ?int $funilId = 
         'client' => [
             'name' => $nomePagador,
             'email' => pestopay_gateway_email($usuario),
-            'cpf' => $cpf,
+            'phone' => $telefonePagador,
+            'document' => $cpf,
         ],
         'products' => [[
             'id' => (string) (isset($produto['id']) ? (int) $produto['id'] : 'default'),
@@ -3533,6 +3706,13 @@ function gerar_pix_para_usuario(array $usuario, array $produto, ?int $funilId = 
             'price' => $valor,
             'externalId' => (string) (isset($produto['id']) ? (int) $produto['id'] : 'default'),
         ]],
+        'metadata' => [
+            'tenant' => current_tenant_slug() !== '' ? current_tenant_slug() : 'default',
+            'usuarioId' => (string) (int) ($usuario['id'] ?? 0),
+            'telegramId' => (string) (int) ($usuario['telegram_id'] ?? 0),
+            'produtoId' => (string) (isset($produto['id']) ? (int) $produto['id'] : 0),
+            'tipoOferta' => $tipoOferta,
+        ],
     ]);
 
     $data = is_array($response['data'] ?? null) ? $response['data'] : [];
@@ -3661,7 +3841,7 @@ function montar_teclado_planos(array $produtos, bool $mostrarBotaoPacks = false)
 
     if ($mostrarBotaoPacks) {
         $keyboard[] = [[
-            'text' => 'Ver packs',
+            'text' => runtime_start_pack_button_text(),
             'callback_data' => 'menu_packs',
         ]];
     }
@@ -3697,7 +3877,7 @@ function montar_teclado_catalogo(array $funis, array $produtos, bool $mostrarBot
 
     if ($mostrarBotaoPacks) {
         $keyboard[] = [[
-            'text' => 'Ver packs',
+            'text' => runtime_start_pack_button_text(),
             'callback_data' => 'menu_packs',
         ]];
     }
@@ -3718,7 +3898,7 @@ function montar_teclado_packs(array $packs, bool $mostrarVoltar = true): string
 
     if ($mostrarVoltar) {
         $keyboard[] = [[
-            'text' => 'Voltar ao menu principal',
+            'text' => runtime_pack_back_button_text(),
             'callback_data' => 'menu_catalogo',
         ]];
     }
@@ -3799,7 +3979,7 @@ function enviar_oferta_funil(int $chatId, array $funil, string $tipoOferta, arra
 
     $botoes = [[
         [
-            'text' => $tipoOferta === 'downsell' ? 'Quero esta opcao' : 'Quero a oferta',
+            'text' => $tipoOferta === 'downsell' ? runtime_downsell_button_text() : runtime_upsell_button_text(),
             'callback_data' => ($tipoOferta === 'downsell' ? 'downsell:' : 'upsell:') . (int) $funil['id'],
         ],
     ]];

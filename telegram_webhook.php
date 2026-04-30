@@ -84,6 +84,7 @@ function processar_mensagem_telegram(array $message): void
     }
 
     if ($comando === '/start') {
+        $remarketingElegivel = !usuario_ja_virou_cliente($usuario);
         enviar_boas_vindas($usuario);
         disparar_fluxos('start', [
             'usuario' => $usuario,
@@ -94,10 +95,22 @@ function processar_mensagem_telegram(array $message): void
             'usuario' => $usuario,
             'start_payload' => $startPayload,
         ]);
-        disparar_remarketing_webhooks('lead_start', [
-            'usuario' => $usuario,
-            'start_payload' => $startPayload,
-        ]);
+        if ($remarketingElegivel) {
+            disparar_remarketing_webhooks('lead_start', [
+                'usuario' => $usuario,
+                'start_payload' => $startPayload,
+                'remarketing' => [
+                    'eligible' => true,
+                    'reason' => 'nao_cliente',
+                ],
+            ]);
+        } else {
+            log_evento('remarketing_lead_start_skip', 'Lead start ignorado no remarketing porque o usuario ja virou cliente.', [
+                'usuario_id' => (int) ($usuario['id'] ?? 0),
+                'telegram_id' => (int) ($usuario['telegram_id'] ?? 0),
+                'tenant' => current_tenant_slug(),
+            ]);
+        }
         return;
     }
 
@@ -269,7 +282,7 @@ function enviar_boas_vindas(array $usuario): void
             $chatId,
             'audio',
             $audioUrl,
-            $audioCaption
+            ''
         );
         if (!is_array($audioResponse) || empty($audioResponse['ok'])) {
             log_evento('start_audio_falhou', 'Falha ao enviar o audio do /start.', [
@@ -280,16 +293,18 @@ function enviar_boas_vindas(array $usuario): void
             if ($audioCaption !== '') {
                 enviar_mensagem($chatId, $audioCaption);
             }
+        } elseif ($audioCaption !== '') {
+            enviar_mensagem($chatId, $audioCaption);
         }
     }
 
     $botoes = [[
-        ['text' => 'Ver planos', 'callback_data' => 'menu_catalogo'],
+        ['text' => runtime_start_plan_button_text(), 'callback_data' => 'menu_catalogo'],
     ]];
 
     if (get_packs_ativos()) {
         $botoes[] = [[
-            ['text' => 'Ver packs', 'callback_data' => 'menu_packs'],
+            ['text' => runtime_start_pack_button_text(), 'callback_data' => 'menu_packs'],
         ]];
     }
 
@@ -390,8 +405,8 @@ function iniciar_compra(array $usuario, int $produtoId, ?int $orderbumpId = null
         }
     }
 
-    if (!runtime_checkout_uses_backend_payer()) {
-        enviar_mensagem($chatId, 'O CPF fixo do checkout ainda nao esta configurado. Acesse Configuracoes e preencha um CPF com 11 numeros para liberar o Pix direto.');
+    if (!runtime_pestopay_checkout_ready($usuario)) {
+        enviar_mensagem($chatId, 'O checkout da PestoPay precisa de um CPF e um telefone fixos validos. Acesse Configuracoes e preencha esses dois campos para liberar o Pix direto.');
         return;
     }
 
@@ -472,8 +487,8 @@ function iniciar_compra_orderbump(array $usuario, int $orderbumpId): void
         return;
     }
 
-    if (!runtime_checkout_uses_backend_payer()) {
-        enviar_mensagem($chatId, 'O CPF fixo do checkout ainda nao esta configurado. Acesse Configuracoes e preencha um CPF com 11 numeros para liberar o Pix direto.');
+    if (!runtime_pestopay_checkout_ready($usuario)) {
+        enviar_mensagem($chatId, 'O checkout da PestoPay precisa de um CPF e um telefone fixos validos. Acesse Configuracoes e preencha esses dois campos para liberar o Pix direto.');
         return;
     }
 
@@ -545,8 +560,8 @@ function iniciar_compra_funil(array $usuario, int $funilId, string $tipoOferta):
         return;
     }
 
-    if (!runtime_checkout_uses_backend_payer()) {
-        enviar_mensagem($chatId, 'O CPF fixo do checkout ainda nao esta configurado. Acesse Configuracoes e preencha um CPF com 11 numeros para liberar o Pix direto.');
+    if (!runtime_pestopay_checkout_ready($usuario)) {
+        enviar_mensagem($chatId, 'O checkout da PestoPay precisa de um CPF e um telefone fixos validos. Acesse Configuracoes e preencha esses dois campos para liberar o Pix direto.');
         return;
     }
 
@@ -598,8 +613,8 @@ function iniciar_compra_downsell(array $usuario, int $downsellId): void
         return;
     }
 
-    if (!runtime_checkout_uses_backend_payer()) {
-        enviar_mensagem($chatId, 'O CPF fixo do checkout ainda nao esta configurado. Acesse Configuracoes e preencha um CPF com 11 numeros para liberar o Pix direto.');
+    if (!runtime_pestopay_checkout_ready($usuario)) {
+        enviar_mensagem($chatId, 'O checkout da PestoPay precisa de um CPF e um telefone fixos validos. Acesse Configuracoes e preencha esses dois campos para liberar o Pix direto.');
         return;
     }
 
