@@ -42,6 +42,18 @@ $pagamentoScope = tenant_scope_condition('pagamentos');
 $orderbumpListScope = tenant_scope_condition('orderbumps', 'o');
 $produtoPrincipalJoinScope = tenant_scope_condition('produtos', 'pm');
 $produtoOfertaJoinScope = tenant_scope_condition('produtos', 'pb');
+$orderbumpSettingFields = [
+    'orderbump_accept_button_text' => ['label' => 'Botao de aceitar', 'type' => 'text', 'default' => runtime_orderbump_accept_button_text()],
+    'orderbump_skip_button_text' => ['label' => 'Botao de recusar', 'type' => 'text', 'default' => runtime_orderbump_skip_button_text()],
+    'msg_orderbump_delivered' => ['label' => 'Mensagem de entrega do order bump', 'type' => 'textarea', 'rows' => 5],
+    'msg_orderbump_missing_link' => ['label' => 'Mensagem quando faltar link do pack', 'type' => 'textarea', 'rows' => 4],
+];
+$orderbumpSettingValues = [
+    'orderbump_accept_button_text' => app_setting('orderbump_accept_button_text', runtime_orderbump_accept_button_text()),
+    'orderbump_skip_button_text' => app_setting('orderbump_skip_button_text', runtime_orderbump_skip_button_text()),
+    'msg_orderbump_delivered' => message_template('msg_orderbump_delivered'),
+    'msg_orderbump_missing_link' => message_template('msg_orderbump_missing_link'),
+];
 
 $form = [
     'id' => 0,
@@ -85,6 +97,15 @@ if ($editingId > 0) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = (string) ($_POST['acao'] ?? '');
+
+    if ($acao === 'salvar_textos_orderbump') {
+        foreach ($orderbumpSettingFields as $field => $meta) {
+            app_setting_save($field, trim((string) ($_POST[$field] ?? '')));
+        }
+
+        header('Location: ' . admin_url('orderbumps.php?ok=textos'));
+        exit;
+    }
 
     if ($acao === 'salvar') {
         $form = [
@@ -386,16 +407,46 @@ include '_layout.php';
     </div>
   </section>
 
-  <section class="card">
-    <div class="card-header">
-      <div>
-        <h2 class="card-title">Order bumps cadastrados</h2>
-        <p class="card-copy">Use editar para carregar a oferta no formulario ao lado. Aqui tambem aparece a midia e o desconto aplicado.</p>
+  <section class="stack">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Textos e botoes do modulo</h2>
+          <p class="card-copy">Os textos abaixo valem para todos os order bumps deste workspace. A mensagem principal da oferta continua dentro de cada order bump cadastrado.</p>
+        </div>
       </div>
-    </div>
-    <div class="card-body" style="padding-top: 0;">
-      <div class="table-wrap">
-        <table>
+      <div class="card-body">
+        <form method="POST" class="stack">
+          <input type="hidden" name="acao" value="salvar_textos_orderbump">
+
+          <?php foreach ($orderbumpSettingFields as $field => $meta): ?>
+            <div class="form-group">
+              <label class="form-label" for="<?= htmlspecialchars($field) ?>"><?= htmlspecialchars($meta['label']) ?></label>
+              <?php if (($meta['type'] ?? 'textarea') === 'text'): ?>
+                <input class="form-control" id="<?= htmlspecialchars($field) ?>" type="text" name="<?= htmlspecialchars($field) ?>" value="<?= htmlspecialchars((string) $orderbumpSettingValues[$field]) ?>">
+              <?php else: ?>
+                <textarea class="form-control" id="<?= htmlspecialchars($field) ?>" name="<?= htmlspecialchars($field) ?>" rows="<?= (int) ($meta['rows'] ?? 4) ?>"><?= htmlspecialchars((string) $orderbumpSettingValues[$field]) ?></textarea>
+              <?php endif; ?>
+            </div>
+          <?php endforeach; ?>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Salvar textos do order bump</button>
+          </div>
+        </form>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Order bumps cadastrados</h2>
+          <p class="card-copy">Use editar para carregar a oferta no formulario ao lado. Aqui tambem aparece a midia e o desconto aplicado.</p>
+        </div>
+      </div>
+      <div class="card-body" style="padding-top: 0;">
+        <div class="table-wrap">
+          <table>
           <thead>
             <tr>
               <th>#</th>
@@ -492,9 +543,10 @@ include '_layout.php';
               </tr>
             <?php endforeach; ?>
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
-    </div>
+    </article>
   </section>
 </div>
 

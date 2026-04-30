@@ -160,7 +160,7 @@ include '_layout.php';
     <div class="card-header">
       <div>
         <h2 class="card-title"><?= $form['id'] > 0 ? 'Editar regra' : 'Nova regra' ?></h2>
-        <p class="card-copy">Cada regra escuta um evento do bot e faz um POST para o webhook que voce escolher. Ideal para n8n, CRM, planilhas e sequencias de remarketing.</p>
+        <p class="card-copy">Cada regra escuta um evento do bot e faz um POST para o webhook que voce escolher. O evento <b>lead_start</b> agora dispara apenas para quem ainda nao virou cliente.</p>
       </div>
       <?php if ($form['id'] > 0): ?>
         <a href="<?= admin_url('remarketing.php') ?>" class="btn btn-ghost btn-sm">Cancelar edicao</a>

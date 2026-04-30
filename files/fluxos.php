@@ -41,8 +41,8 @@ $fields = [
         'type' => 'text',
     ],
     'msg_start_audio_caption' => [
-        'label' => 'Legenda do audio separado',
-        'help' => 'Texto opcional enviado junto com o audio da segunda etapa do /start.',
+        'label' => 'Mensagem depois do audio',
+        'help' => 'Texto opcional enviado logo depois do audio da segunda etapa do /start.',
         'rows' => 3,
     ],
     'msg_start_audio_url' => [
@@ -54,6 +54,21 @@ $fields = [
         'label' => 'Mensagem final com botoes',
         'help' => 'Terceira etapa do /start. Essa mensagem sai com os botoes de Planos e, se houver packs ativos, Packs.',
         'rows' => 5,
+    ],
+    'start_button_planos_text' => [
+        'label' => 'Texto do botao de planos',
+        'help' => 'Texto do botao principal exibido no /start.',
+        'type' => 'text',
+    ],
+    'start_button_packs_text' => [
+        'label' => 'Texto do botao de packs',
+        'help' => 'So aparece quando houver packs ativos.',
+        'type' => 'text',
+    ],
+    'packs_back_button_text' => [
+        'label' => 'Texto do botao de voltar nos packs',
+        'help' => 'Botao exibido dentro do submenu de packs.',
+        'type' => 'text',
     ],
     'msg_choose_plan' => [
         'label' => 'Mensagem ao abrir os planos',
@@ -77,23 +92,8 @@ $fields = [
     ],
     'msg_pix_error' => [
         'label' => 'Mensagem de erro do Pix',
-    'help' => 'Usada quando o checkout nao consegue gerar o Pix por falta de configuracao ou erro na PestoPay.',
+        'help' => 'Usada quando o checkout nao consegue gerar o Pix por falta de configuracao ou erro na PestoPay.',
         'rows' => 5,
-    ],
-    'msg_upsell_offer' => [
-        'label' => 'Mensagem base de upsell',
-        'help' => 'Mensagem que embrulha a oferta de upsell enviada pelo funil. Pode usar {mensagem}.',
-        'rows' => 5,
-    ],
-    'msg_orderbump_delivered' => [
-        'label' => 'Mensagem de entrega do order bump',
-        'help' => 'Mensagem enviada depois da compra do order bump. Pode usar {conteudo}.',
-        'rows' => 5,
-    ],
-    'msg_orderbump_missing_link' => [
-        'label' => 'Order bump sem link configurado',
-        'help' => 'Fallback quando a oferta extra for um pack, mas o link ainda nao foi cadastrado.',
-        'rows' => 4,
     ],
 ];
 
@@ -106,6 +106,16 @@ foreach (array_keys($fields) as $field) {
 
     if ($field === 'msg_start_media_url' || $field === 'msg_start_audio_url') {
         $values[$field] = app_setting($field, '');
+        continue;
+    }
+
+    if (in_array($field, ['start_button_planos_text', 'start_button_packs_text', 'packs_back_button_text'], true)) {
+        $defaults = [
+            'start_button_planos_text' => runtime_start_plan_button_text(),
+            'start_button_packs_text' => runtime_start_pack_button_text(),
+            'packs_back_button_text' => runtime_pack_back_button_text(),
+        ];
+        $values[$field] = app_setting($field, $defaults[$field]);
         continue;
     }
 
@@ -177,112 +187,54 @@ include '_layout.php';
   <div class="alert alert-<?= htmlspecialchars($msg['tipo']) ?>"><?= htmlspecialchars($msg['texto']) ?></div>
 <?php endif; ?>
 
-<div class="content-grid" style="grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);">
-  <section class="card">
-      <div class="card-header">
-      <div>
-        <p class="card-kicker">Fluxo unico</p>
-        <h2 class="card-title">Roteiro do bot</h2>
-        <p class="card-copy">Aqui fica o caminho principal: mensagem inicial com botao de planos, escolha do plano, Pix direto e os textos de entrega. O upsell visual fica em <b>Funis / Upsell</b> e a mensagem real do order bump fica em <b>Order Bump</b>.</p>
-      </div>
-      <div class="actions">
-        <a href="<?= admin_url('funis.php') ?>" class="btn btn-ghost btn-sm">Abrir upsell</a>
-        <a href="<?= admin_url('downsells.php') ?>" class="btn btn-ghost btn-sm">Abrir downsell</a>
-        <a href="<?= admin_url('orderbumps.php') ?>" class="btn btn-ghost btn-sm">Abrir order bump</a>
-        <a href="<?= admin_url('remarketing.php') ?>" class="btn btn-ghost btn-sm">Abrir remarketing</a>
-        <form method="POST" class="inline-form">
-          <input type="hidden" name="acao" value="sincronizar_comandos">
-          <button type="submit" class="btn btn-ghost btn-sm">Sincronizar comandos</button>
-        </form>
-        <form method="POST" class="inline-form" onsubmit="return confirm('Apagar os fluxos antigos do banco? Esta acao remove automacoes legadas e filas antigas.');">
-          <input type="hidden" name="acao" value="limpar_fluxos_antigos">
-          <button type="submit" class="btn btn-danger btn-sm">Apagar fluxos antigos</button>
-        </form>
-      </div>
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">Fluxo do /start</h2>
+      <p class="card-copy">Aqui ficam apenas as etapas do inicio do bot: midia inicial, audio separado, mensagem final com botoes, menu de planos/packs e mensagens do Pix.</p>
     </div>
-    <div class="card-body">
-      <div class="journey-map">
-        <article class="journey-step">
-          <div class="journey-step-index">01</div>
-          <div class="journey-step-body">
-            <h3 class="journey-step-title">Imagem ou video</h3>
-            <p class="journey-step-copy">O lead recebe a primeira midia do <span class="mono">/start</span> com a legenda configurada no painel.</p>
-          </div>
-        </article>
-
-        <article class="journey-step">
-          <div class="journey-step-index">02</div>
-          <div class="journey-step-body">
-            <h3 class="journey-step-title">Audio separado</h3>
-            <p class="journey-step-copy">Depois da primeira midia, o bot pode enviar um audio separado para aquecer o lead. Links .ogg e links com redirecionamento agora tem fallback automatico.</p>
-          </div>
-        </article>
-
-        <article class="journey-step">
-          <div class="journey-step-index">03</div>
-          <div class="journey-step-body">
-            <h3 class="journey-step-title">Mensagem com botoes</h3>
-            <p class="journey-step-copy">Na terceira etapa o lead recebe os botoes para abrir os planos e, se houver packs ativos, os packs.</p>
-          </div>
-        </article>
-
-        <article class="journey-step">
-          <div class="journey-step-index">04</div>
-          <div class="journey-step-body">
-            <h3 class="journey-step-title">Pix sem CPF</h3>
-            <p class="journey-step-copy">Depois da escolha, o checkout usa o CPF interno do backend e gera o Pix sem pedir CPF ao cliente.</p>
-          </div>
-        </article>
-      </div>
-
-      <div class="alert alert-info" style="margin-top: 20px;">Se precisar trocar o CPF interno do checkout, use a area de <b>Configuracoes</b>. Este painel de fluxo ficou so para o roteiro principal. A mensagem do order bump agora e configurada apenas na propria tela de <b>Order Bump</b>.</div>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card-header">
-      <div>
-        <p class="card-kicker">Editor visual</p>
-        <h2 class="card-title">Mensagens editaveis</h2>
-        <p class="card-copy">Os textos abaixo alimentam exatamente o bot. O /start agora pode seguir a ordem: midia, audio e mensagem final com botoes.</p>
-      </div>
-    </div>
-    <div class="card-body">
-      <form method="POST" class="stack">
-        <input type="hidden" name="acao" value="salvar_fluxo">
-
-        <?php foreach ($fields as $field => $meta): ?>
-          <div class="form-group">
-            <label class="form-label" for="<?= htmlspecialchars($field) ?>"><?= htmlspecialchars($meta['label']) ?></label>
-            <?php if (($meta['type'] ?? 'textarea') === 'select'): ?>
-              <select class="form-control" id="<?= htmlspecialchars($field) ?>" name="<?= htmlspecialchars($field) ?>">
-                <?php foreach (($meta['options'] ?? []) as $optionValue => $optionLabel): ?>
-                  <option value="<?= htmlspecialchars((string) $optionValue) ?>" <?= (string) $values[$field] === (string) $optionValue ? 'selected' : '' ?>>
-                    <?= htmlspecialchars((string) $optionLabel) ?>
-                  </option>
-                <?php endforeach; ?>
-              </select>
-            <?php elseif (($meta['type'] ?? 'textarea') === 'text'): ?>
-              <input class="form-control" type="text" id="<?= htmlspecialchars($field) ?>" name="<?= htmlspecialchars($field) ?>" value="<?= htmlspecialchars((string) $values[$field]) ?>">
-            <?php else: ?>
-              <textarea class="form-control" id="<?= htmlspecialchars($field) ?>" name="<?= htmlspecialchars($field) ?>" rows="<?= (int) $meta['rows'] ?>"><?= htmlspecialchars((string) $values[$field]) ?></textarea>
-            <?php endif; ?>
-            <span class="form-help"><?= htmlspecialchars($meta['help']) ?></span>
-          </div>
-        <?php endforeach; ?>
-
-        <div class="form-group">
-          <label class="form-label">Botoes do /start</label>
-          <input class="form-control" type="text" value="Ver planos + Ver packs (quando houver packs ativos)" disabled>
-          <span class="form-help">Os botoes finais ficam padronizados para manter o fluxo previsivel e facilitar a automacao externa.</span>
-        </div>
-
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Salvar fluxo</button>
-        </div>
+    <div class="actions">
+      <form method="POST" class="inline-form">
+        <input type="hidden" name="acao" value="sincronizar_comandos">
+        <button type="submit" class="btn btn-ghost btn-sm">Sincronizar comandos</button>
+      </form>
+      <form method="POST" class="inline-form" onsubmit="return confirm('Apagar os fluxos antigos do banco? Esta acao remove automacoes legadas e filas antigas.');">
+        <input type="hidden" name="acao" value="limpar_fluxos_antigos">
+        <button type="submit" class="btn btn-danger btn-sm">Apagar fluxos antigos</button>
       </form>
     </div>
-  </section>
-</div>
+  </div>
+  <div class="card-body">
+    <div class="alert alert-info" style="margin-bottom: 20px;">As configuracoes de <b>Upsell</b>, <b>Downsell</b>, <b>Order Bump</b> e <b>Remarketing</b> agora ficam apenas nas paginas proprias de cada modulo.</div>
+
+    <form method="POST" class="stack">
+      <input type="hidden" name="acao" value="salvar_fluxo">
+
+      <?php foreach ($fields as $field => $meta): ?>
+        <div class="form-group">
+          <label class="form-label" for="<?= htmlspecialchars($field) ?>"><?= htmlspecialchars($meta['label']) ?></label>
+          <?php if (($meta['type'] ?? 'textarea') === 'select'): ?>
+            <select class="form-control" id="<?= htmlspecialchars($field) ?>" name="<?= htmlspecialchars($field) ?>">
+              <?php foreach (($meta['options'] ?? []) as $optionValue => $optionLabel): ?>
+                <option value="<?= htmlspecialchars((string) $optionValue) ?>" <?= (string) $values[$field] === (string) $optionValue ? 'selected' : '' ?>>
+                  <?= htmlspecialchars((string) $optionLabel) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          <?php elseif (($meta['type'] ?? 'textarea') === 'text'): ?>
+            <input class="form-control" type="text" id="<?= htmlspecialchars($field) ?>" name="<?= htmlspecialchars($field) ?>" value="<?= htmlspecialchars((string) $values[$field]) ?>">
+          <?php else: ?>
+            <textarea class="form-control" id="<?= htmlspecialchars($field) ?>" name="<?= htmlspecialchars($field) ?>" rows="<?= (int) $meta['rows'] ?>"><?= htmlspecialchars((string) $values[$field]) ?></textarea>
+          <?php endif; ?>
+          <span class="form-help"><?= htmlspecialchars($meta['help']) ?></span>
+        </div>
+      <?php endforeach; ?>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Salvar fluxo</button>
+      </div>
+    </form>
+  </div>
+</section>
 
 <?php include '_footer.php'; ?>

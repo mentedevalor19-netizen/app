@@ -27,6 +27,7 @@ $integrationFields = [
     'telegram_group_id' => ['label' => 'Telegram group ID', 'type' => 'text', 'placeholder' => '-1001234567890'],
     'checkout_fixed_name' => ['label' => 'Nome fixo do pagador', 'type' => 'text', 'placeholder' => 'Nome usado no checkout'],
     'checkout_fixed_cpf' => ['label' => 'CPF fixo do checkout', 'type' => 'text', 'placeholder' => '12345678901'],
+    'checkout_fixed_phone' => ['label' => 'Telefone fixo do checkout', 'type' => 'text', 'placeholder' => '11999999999'],
     'pestopay_public_key' => ['label' => 'PestoPay public key', 'type' => 'text', 'placeholder' => 'sua_public_key'],
     'pestopay_secret_key' => ['label' => 'PestoPay secret key', 'type' => 'text', 'placeholder' => 'sua_secret_key'],
     'pestopay_webhook_token' => ['label' => 'PestoPay webhook token', 'type' => 'text', 'placeholder' => 'token retornado pela API'],
@@ -67,6 +68,7 @@ $values = [
     'telegram_group_id' => app_setting('telegram_group_id', TELEGRAM_GROUP_ID),
     'checkout_fixed_name' => app_setting('checkout_fixed_name', ''),
     'checkout_fixed_cpf' => app_setting('checkout_fixed_cpf', ''),
+    'checkout_fixed_phone' => app_setting('checkout_fixed_phone', ''),
     'pestopay_public_key' => app_setting('pestopay_public_key', app_setting('ecompag_client_id', PESTOPAY_PUBLIC_KEY)),
     'pestopay_secret_key' => app_setting('pestopay_secret_key', app_setting('ecompag_client_secret', PESTOPAY_SECRET_KEY)),
     'pestopay_webhook_token' => app_setting('pestopay_webhook_token', ''),
@@ -137,7 +139,7 @@ include '_layout.php';
         </div>
 
         <div class="form-grid">
-          <?php foreach (['checkout_fixed_name', 'checkout_fixed_cpf'] as $field): ?>
+          <?php foreach (['checkout_fixed_name', 'checkout_fixed_cpf', 'checkout_fixed_phone'] as $field): ?>
             <div class="form-group">
               <label class="form-label" for="<?= htmlspecialchars($field) ?>"><?= htmlspecialchars($integrationFields[$field]['label']) ?></label>
               <input
@@ -151,10 +153,10 @@ include '_layout.php';
             </div>
           <?php endforeach; ?>
         </div>
-        <div class="form-help">Preencha o CPF fixo com 11 numeros para o bot gerar o Pix direto, sem pedir CPF ao cliente. O nome fixo do pagador e opcional, mas recomendado.</div>
+        <div class="form-help">Preencha o CPF fixo com 11 numeros e um telefone valido para o bot gerar o Pix direto pela PestoPay, sem pedir esses dados ao cliente. O nome fixo do pagador e opcional, mas recomendado.</div>
 
-        <?php if (!runtime_checkout_uses_backend_payer()): ?>
-          <div class="alert alert-warning">O CPF fixo do checkout ainda nao esta pronto. Preencha um CPF com 11 numeros para o Pix gerar sem pedir CPF ao cliente.</div>
+        <?php if (!runtime_pestopay_checkout_ready()): ?>
+          <div class="alert alert-warning">O checkout ainda nao esta pronto para gerar Pix. Preencha um CPF com 11 numeros e um telefone valido para a PestoPay.</div>
         <?php endif; ?>
 
         <?php if (trim((string) $values['pestopay_public_key']) === '' || trim((string) $values['pestopay_secret_key']) === ''): ?>

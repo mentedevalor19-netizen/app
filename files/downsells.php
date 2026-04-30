@@ -43,6 +43,14 @@ $disparoScope = tenant_scope_condition('downsell_disparos');
 $funilListScope = tenant_scope_condition('funis', 'f');
 $produtoJoinScope = tenant_scope_condition('produtos', 'p');
 $downsellListScope = tenant_scope_condition('downsells', 'd');
+$downsellSettingFields = [
+    'downsell_button_text' => ['label' => 'Botao do downsell', 'type' => 'text'],
+    'msg_downsell_offer' => ['label' => 'Mensagem base do downsell', 'type' => 'textarea', 'rows' => 5],
+];
+$downsellSettingValues = [
+    'downsell_button_text' => app_setting('downsell_button_text', runtime_downsell_button_text()),
+    'msg_downsell_offer' => message_template('msg_downsell_offer'),
+];
 
 $form = [
     'id' => 0,
@@ -86,6 +94,15 @@ if ($editingId > 0) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = (string) ($_POST['acao'] ?? '');
+
+    if ($acao === 'salvar_textos_downsell') {
+        foreach (array_keys($downsellSettingFields) as $field) {
+            app_setting_save($field, trim((string) ($_POST[$field] ?? '')));
+        }
+
+        header('Location: ' . admin_url('downsells.php?ok=textos'));
+        exit;
+    }
 
     if ($acao === 'salvar') {
         $form = [
@@ -391,16 +408,46 @@ include '_layout.php';
     </div>
   </section>
 
-  <section class="card">
-    <div class="card-header">
-      <div>
-        <h2 class="card-title">Downsells cadastrados</h2>
-        <p class="card-copy">Use editar para carregar a oferta no formulario ao lado. Aqui tambem aparece o atraso e o webhook configurado.</p>
+  <section class="stack">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Textos e botao do downsell</h2>
+          <p class="card-copy">Esses campos controlam a mensagem-base e o texto do botao do downsell. A mensagem especifica da oferta continua dentro de cada downsell.</p>
+        </div>
       </div>
-    </div>
-    <div class="card-body" style="padding-top: 0;">
-      <div class="table-wrap">
-        <table>
+      <div class="card-body">
+        <form method="POST" class="stack">
+          <input type="hidden" name="acao" value="salvar_textos_downsell">
+
+          <?php foreach ($downsellSettingFields as $field => $meta): ?>
+            <div class="form-group">
+              <label class="form-label" for="<?= htmlspecialchars($field) ?>"><?= htmlspecialchars($meta['label']) ?></label>
+              <?php if (($meta['type'] ?? 'textarea') === 'text'): ?>
+                <input class="form-control" id="<?= htmlspecialchars($field) ?>" type="text" name="<?= htmlspecialchars($field) ?>" value="<?= htmlspecialchars((string) $downsellSettingValues[$field]) ?>">
+              <?php else: ?>
+                <textarea class="form-control" id="<?= htmlspecialchars($field) ?>" name="<?= htmlspecialchars($field) ?>" rows="<?= (int) ($meta['rows'] ?? 4) ?>"><?= htmlspecialchars((string) $downsellSettingValues[$field]) ?></textarea>
+              <?php endif; ?>
+            </div>
+          <?php endforeach; ?>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Salvar textos do downsell</button>
+          </div>
+        </form>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Downsells cadastrados</h2>
+          <p class="card-copy">Use editar para carregar a oferta no formulario ao lado. Aqui tambem aparece o atraso e o webhook configurado.</p>
+        </div>
+      </div>
+      <div class="card-body" style="padding-top: 0;">
+        <div class="table-wrap">
+          <table>
           <thead>
             <tr>
               <th>#</th>
@@ -479,6 +526,7 @@ include '_layout.php';
         </table>
       </div>
     </div>
+  </article>
   </section>
 </div>
 

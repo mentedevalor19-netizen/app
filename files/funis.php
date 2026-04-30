@@ -44,6 +44,14 @@ $fluxoScope = tenant_scope_condition('fluxos');
 $funilListScope = tenant_scope_condition('funis', 'f');
 $produtoPrincipalJoinScope = tenant_scope_condition('produtos', 'p');
 $produtoUpsellJoinScope = tenant_scope_condition('produtos', 'u');
+$upsellSettingFields = [
+    'upsell_button_text' => ['label' => 'Botao do upsell', 'type' => 'text'],
+    'msg_upsell_offer' => ['label' => 'Mensagem base do upsell', 'type' => 'textarea', 'rows' => 5],
+];
+$upsellSettingValues = [
+    'upsell_button_text' => app_setting('upsell_button_text', runtime_upsell_button_text()),
+    'msg_upsell_offer' => message_template('msg_upsell_offer'),
+];
 
 $form = [
     'id' => 0,
@@ -91,6 +99,15 @@ if ($editingId > 0) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $acao = (string) ($_POST['acao'] ?? '');
+
+    if ($acao === 'salvar_textos_upsell') {
+        foreach (array_keys($upsellSettingFields) as $field) {
+            app_setting_save($field, trim((string) ($_POST[$field] ?? '')));
+        }
+
+        header('Location: ' . admin_url('funis.php?ok=textos'));
+        exit;
+    }
 
     if ($acao === 'salvar') {
         $form = [
@@ -423,16 +440,46 @@ include '_layout.php';
     </div>
   </section>
 
-  <section class="card">
-    <div class="card-header">
-      <div>
-        <h2 class="card-title">Funis cadastrados</h2>
-        <p class="card-copy">Use editar para carregar o funil no formulario ao lado. Aqui tambem aparece a midia do upsell que vai junto com a oferta.</p>
+  <section class="stack">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Textos e botao do upsell</h2>
+          <p class="card-copy">Esses campos controlam a mensagem-base e o texto do botao do upsell. A mensagem especifica da oferta continua dentro de cada funil.</p>
+        </div>
       </div>
-    </div>
-    <div class="card-body" style="padding-top: 0;">
-      <div class="table-wrap">
-        <table>
+      <div class="card-body">
+        <form method="POST" class="stack">
+          <input type="hidden" name="acao" value="salvar_textos_upsell">
+
+          <?php foreach ($upsellSettingFields as $field => $meta): ?>
+            <div class="form-group">
+              <label class="form-label" for="<?= htmlspecialchars($field) ?>"><?= htmlspecialchars($meta['label']) ?></label>
+              <?php if (($meta['type'] ?? 'textarea') === 'text'): ?>
+                <input class="form-control" id="<?= htmlspecialchars($field) ?>" type="text" name="<?= htmlspecialchars($field) ?>" value="<?= htmlspecialchars((string) $upsellSettingValues[$field]) ?>">
+              <?php else: ?>
+                <textarea class="form-control" id="<?= htmlspecialchars($field) ?>" name="<?= htmlspecialchars($field) ?>" rows="<?= (int) ($meta['rows'] ?? 4) ?>"><?= htmlspecialchars((string) $upsellSettingValues[$field]) ?></textarea>
+              <?php endif; ?>
+            </div>
+          <?php endforeach; ?>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Salvar textos do upsell</button>
+          </div>
+        </form>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Funis cadastrados</h2>
+          <p class="card-copy">Use editar para carregar o funil no formulario ao lado. Aqui tambem aparece a midia do upsell que vai junto com a oferta.</p>
+        </div>
+      </div>
+      <div class="card-body" style="padding-top: 0;">
+        <div class="table-wrap">
+          <table>
           <thead>
             <tr>
               <th>#</th>
@@ -537,6 +584,7 @@ include '_layout.php';
         </table>
       </div>
     </div>
+  </article>
   </section>
 </div>
 
