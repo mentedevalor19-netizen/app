@@ -41,6 +41,9 @@ $produtoScope = tenant_scope_condition('produtos');
 $downsellScope = tenant_scope_condition('downsells');
 $pagamentoScope = tenant_scope_condition('pagamentos');
 $fluxoScope = tenant_scope_condition('fluxos');
+$funilListScope = tenant_scope_condition('funis', 'f');
+$produtoPrincipalJoinScope = tenant_scope_condition('produtos', 'p');
+$produtoUpsellJoinScope = tenant_scope_condition('produtos', 'u');
 
 $form = [
     'id' => 0,
@@ -262,9 +265,9 @@ $funis = $pdo->query(
             p.nome AS produto_principal_nome, p.valor AS produto_principal_valor, p.tipo AS produto_principal_tipo,
             u.nome AS upsell_produto_nome, u.valor AS upsell_produto_valor, u.tipo AS upsell_produto_tipo
      FROM funis f
-     LEFT JOIN produtos p ON p.id = f.produto_principal_id AND ' . $produtoScope . '
-     LEFT JOIN produtos u ON u.id = f.upsell_produto_id AND ' . $produtoScope . '
-     WHERE ' . $funilScope . '
+     LEFT JOIN produtos p ON p.id = f.produto_principal_id AND ' . $produtoPrincipalJoinScope . '
+     LEFT JOIN produtos u ON u.id = f.upsell_produto_id AND ' . $produtoUpsellJoinScope . '
+     WHERE ' . $funilListScope . '
      ORDER BY ' . db_order_by_clause('funis', 'f')
 )->fetchAll();
 

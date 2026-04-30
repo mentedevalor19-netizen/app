@@ -40,6 +40,9 @@ $downsellScope = tenant_scope_condition('downsells');
 $funilScope = tenant_scope_condition('funis');
 $produtoScope = tenant_scope_condition('produtos');
 $disparoScope = tenant_scope_condition('downsell_disparos');
+$funilListScope = tenant_scope_condition('funis', 'f');
+$produtoJoinScope = tenant_scope_condition('produtos', 'p');
+$downsellListScope = tenant_scope_condition('downsells', 'd');
 
 $form = [
     'id' => 0,
@@ -228,17 +231,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $funis = $pdo->query(
     'SELECT f.*, p.nome AS produto_principal_nome
      FROM funis f
-     LEFT JOIN produtos p ON p.id = f.produto_principal_id AND ' . $produtoScope . '
-     WHERE ' . $funilScope . '
+     LEFT JOIN produtos p ON p.id = f.produto_principal_id AND ' . $produtoJoinScope . '
+     WHERE ' . $funilListScope . '
      ORDER BY ' . db_order_by_clause('funis', 'f')
 )->fetchAll();
 $produtos = $pdo->query('SELECT * FROM produtos WHERE ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
 $downsells = $pdo->query(
     'SELECT d.*, f.nome AS funil_nome, p.nome AS produto_nome, p.valor AS produto_valor
      FROM downsells d
-     LEFT JOIN funis f ON f.id = d.funil_id AND ' . $funilScope . '
-     LEFT JOIN produtos p ON p.id = d.produto_id AND ' . $produtoScope . '
-     WHERE ' . $downsellScope . '
+     LEFT JOIN funis f ON f.id = d.funil_id AND ' . $funilListScope . '
+     LEFT JOIN produtos p ON p.id = d.produto_id AND ' . $produtoJoinScope . '
+     WHERE ' . $downsellListScope . '
      ORDER BY ' . db_order_by_clause('downsells', 'd')
 )->fetchAll();
 

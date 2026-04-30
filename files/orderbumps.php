@@ -39,6 +39,9 @@ $msg = null;
 $orderbumpScope = tenant_scope_condition('orderbumps');
 $produtoScope = tenant_scope_condition('produtos');
 $pagamentoScope = tenant_scope_condition('pagamentos');
+$orderbumpListScope = tenant_scope_condition('orderbumps', 'o');
+$produtoPrincipalJoinScope = tenant_scope_condition('produtos', 'pm');
+$produtoOfertaJoinScope = tenant_scope_condition('produtos', 'pb');
 
 $form = [
     'id' => 0,
@@ -238,9 +241,9 @@ $orderbumps = $pdo->query(
             ($hasTipoProduto ? ', pb.tipo AS produto_tipo' : ", 'grupo' AS produto_tipo") . ',
             ' . ($hasPackLink ? 'pb.pack_link' : 'NULL') . ' AS produto_pack_link
      FROM orderbumps o
-     LEFT JOIN produtos pm ON pm.id = o.produto_principal_id AND ' . $produtoScope . '
-     LEFT JOIN produtos pb ON pb.id = o.produto_id AND ' . $produtoScope . '
-     WHERE ' . $orderbumpScope . '
+     LEFT JOIN produtos pm ON pm.id = o.produto_principal_id AND ' . $produtoPrincipalJoinScope . '
+     LEFT JOIN produtos pb ON pb.id = o.produto_id AND ' . $produtoOfertaJoinScope . '
+     WHERE ' . $orderbumpListScope . '
      ORDER BY ' . db_order_by_clause('orderbumps', 'o')
 )->fetchAll();
 

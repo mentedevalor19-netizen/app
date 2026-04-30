@@ -14,6 +14,8 @@ $inicioProximoMes = date('Y-m-01 00:00:00', strtotime('+1 month'));
 $expiraEmTresDias = date('Y-m-d H:i:s', strtotime('+3 days'));
 $userScope = tenant_scope_condition('usuarios');
 $paymentScope = tenant_scope_condition('pagamentos');
+$recentPaymentScope = tenant_scope_condition('pagamentos', 'p');
+$recentUserScope = tenant_scope_condition('usuarios', 'u');
 
 $totalUsuarios = (int) $pdo->query('SELECT COUNT(*) FROM usuarios WHERE ' . $userScope)->fetchColumn();
 $stmtUsuariosAtivos = $pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE $userScope AND status = 'ativo' AND (data_expiracao IS NULL OR data_expiracao > ?)");
@@ -32,8 +34,8 @@ $receitaMes = (float) $stmtReceitaMes->fetchColumn();
 $ultimosPagamentos = $pdo->query(
     "SELECT p.*, u.first_name, u.telegram_id
      FROM pagamentos p
-     JOIN usuarios u ON u.id = p.usuario_id
-     WHERE $paymentScope
+     JOIN usuarios u ON u.id = p.usuario_id AND $recentUserScope
+     WHERE $recentPaymentScope
      ORDER BY p.created_at DESC
      LIMIT 8"
 )->fetchAll();
