@@ -2912,10 +2912,81 @@ function get_produtos_ativos(): array
     ]];
 }
 
+function produtos_has_visibility_controls(): bool
+{
+    return db_has_column('produtos', 'mostrar_catalogo')
+        && db_has_column('produtos', 'permitir_orderbump')
+        && db_has_column('produtos', 'permitir_upsell')
+        && db_has_column('produtos', 'permitir_downsell');
+}
+
+function produto_visibility_flag(array $produto, string $field, int $default = 1): int
+{
+    if (!produtos_has_visibility_controls()) {
+        return $default;
+    }
+
+    return (int) ($produto[$field] ?? $default) === 1 ? 1 : 0;
+}
+
+function produto_mostrar_catalogo(array $produto): bool
+{
+    return produto_visibility_flag($produto, 'mostrar_catalogo') === 1;
+}
+
+function produto_permite_orderbump(array $produto): bool
+{
+    return produto_visibility_flag($produto, 'permitir_orderbump') === 1;
+}
+
+function produto_permite_upsell(array $produto): bool
+{
+    return produto_visibility_flag($produto, 'permitir_upsell') === 1;
+}
+
+function produto_permite_downsell(array $produto): bool
+{
+    return produto_visibility_flag($produto, 'permitir_downsell') === 1;
+}
+
+function filtrar_produtos_por_contexto(array $produtos, string $contexto): array
+{
+    return array_values(array_filter($produtos, static function (array $produto) use ($contexto): bool {
+        if ((int) ($produto['ativo'] ?? 1) !== 1) {
+            return false;
+        }
+
+        return match ($contexto) {
+            'catalogo' => produto_mostrar_catalogo($produto),
+            'orderbump' => produto_permite_orderbump($produto),
+            'upsell' => produto_permite_upsell($produto),
+            'downsell' => produto_permite_downsell($produto),
+            default => true,
+        };
+    }));
+}
+
+function adicionar_produto_unico(array $produtos, ?array $produto): array
+{
+    if (!$produto) {
+        return $produtos;
+    }
+
+    $produtoId = (int) ($produto['id'] ?? 0);
+    foreach ($produtos as $item) {
+        if ((int) ($item['id'] ?? 0) === $produtoId) {
+            return $produtos;
+        }
+    }
+
+    $produtos[] = $produto;
+    return $produtos;
+}
+
 function get_produto_por_id(int $produtoId): ?array
 {
     if ($produtoId === 0) {
-        return get_produtos_ativos()[0] ?? null;
+        return get_produtos_grupo_ativos()[0] ?? get_produtos_ativos()[0] ?? null;
     }
 
     $stmt = db()->prepare('SELECT * FROM produtos WHERE id = ? AND ' . tenant_scope_condition('produtos') . ' LIMIT 1');
@@ -3000,6 +3071,10 @@ function get_produto_oferta_funil(array $funil, string $tipoOferta): ?array
         return null;
     }
 
+    if ($tipoOferta === 'upsell' && !produto_permite_upsell($produto)) {
+        return null;
+    }
+
     if ($tipoOferta === 'upsell') {
         return produto_com_desconto($produto, funil_upsell_desconto($funil));
     }
@@ -3019,18 +3094,25 @@ function get_produto_oferta_downsell(array $downsell): ?array
         return null;
     }
 
+    if (!produto_permite_downsell($produto)) {
+        return null;
+    }
+
     return produto_com_desconto($produto, downsell_desconto_percentual($downsell));
 }
 
 function get_packs_ativos(): array
 {
-    return array_values(array_filter(get_produtos_ativos(), 'produto_is_pack'));
+    return array_values(array_filter(
+        filtrar_produtos_por_contexto(get_produtos_ativos(), 'catalogo'),
+        'produto_is_pack'
+    ));
 }
 
 function get_produtos_grupo_ativos(): array
 {
     return array_values(array_filter(
-        get_produtos_ativos(),
+        filtrar_produtos_por_contexto(get_produtos_ativos(), 'catalogo'),
         static fn(array $produto): bool => !produto_is_pack($produto)
     ));
 }
@@ -3142,6 +3224,10 @@ function get_produto_oferta_orderbump(array $orderbump): ?array
 
     $produto = get_produto_por_id($produtoId);
     if (!$produto || !((int) ($produto['ativo'] ?? 1))) {
+        return null;
+    }
+
+    if (!produto_permite_orderbump($produto)) {
         return null;
     }
 
