@@ -303,12 +303,12 @@ function enviar_boas_vindas(array $usuario): void
     ]];
 
     if (get_packs_ativos()) {
-        $botoes[] = [[
+        $botoes[] = [
             ['text' => runtime_start_pack_button_text(), 'callback_data' => 'menu_packs'],
-        ]];
+        ];
     }
 
-    enviar_mensagem(
+    $ctaResponse = enviar_mensagem(
         $chatId,
         render_template(message_template('msg_start_cta'), [
             'nome' => $nome,
@@ -319,6 +319,13 @@ function enviar_boas_vindas(array $usuario): void
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]
     );
+
+    if (!is_array($ctaResponse) || empty($ctaResponse['ok'])) {
+        log_evento('start_cta_falhou', 'Falha ao enviar a mensagem final com botoes do /start.', [
+            'chat_id' => $chatId,
+            'botoes' => $botoes,
+        ]);
+    }
 }
 
 function enviar_status_usuario(array $usuario): void
