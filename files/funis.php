@@ -130,6 +130,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $form['upsell_desconto_percentual'] = (float) $form['upsell_desconto_percentual'];
         $form['upsell_desconto_percentual'] = max(0, min(100, (float) $form['upsell_desconto_percentual']));
         $form['upsell_desconto_percentual'] = number_format((float) $form['upsell_desconto_percentual'], 2, '.', '');
+        $produtoPrincipal = get_produto_por_id($form['produto_principal_id']);
+        $produtoUpsell = get_produto_por_id($form['upsell_produto_id']);
 
         if ($form['nome'] === '') {
             $msg = ['tipo' => 'danger', 'texto' => 'Informe um nome para o funil.'];
@@ -139,8 +141,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['tipo' => 'danger', 'texto' => 'Selecione o produto de upsell.'];
         } elseif ($form['upsell_produto_id'] === $form['produto_principal_id']) {
             $msg = ['tipo' => 'danger', 'texto' => 'O produto principal e o upsell precisam ser diferentes.'];
-        } elseif (!get_produto_por_id($form['produto_principal_id']) || !get_produto_por_id($form['upsell_produto_id'])) {
+        } elseif (!$produtoPrincipal || !$produtoUpsell) {
             $msg = ['tipo' => 'danger', 'texto' => 'Os produtos escolhidos precisam pertencer ao workspace atual.'];
+        } elseif (!produto_mostrar_catalogo($produtoPrincipal)) {
+            $msg = ['tipo' => 'danger', 'texto' => 'O produto principal do funil precisa estar liberado para aparecer no catalogo do bot.'];
+        } elseif (!produto_permite_upsell($produtoUpsell)) {
+            $msg = ['tipo' => 'danger', 'texto' => 'O produto de upsell precisa estar liberado para uso em upsell.'];
         } elseif ($form['upsell_media_tipo'] !== 'none' && $form['upsell_media_url'] === '') {
             $msg = ['tipo' => 'danger', 'texto' => 'Se escolher uma midia para o upsell, informe a URL publica dela.'];
         } elseif ($form['upsell_media_tipo'] !== 'none' && filter_var($form['upsell_media_url'], FILTER_VALIDATE_URL) === false) {
@@ -276,7 +282,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$produtos = $pdo->query('SELECT * FROM produtos WHERE ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtos = $pdo->query('SELECT * FROM produtos WHERE ativo = 1 AND ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtosPrincipais = filtrar_produtos_por_contexto($produtos, 'catalogo');
+$produtosUpsell = filtrar_produtos_por_contexto($produtos, 'upsell');
+$produtosPrincipais = adicionar_produto_unico($produtosPrincipais, get_produto_por_id((int) ($form['produto_principal_id'] ?? 0)));
+$produtosUpsell = adicionar_produto_unico($produtosUpsell, get_produto_por_id((int) ($form['upsell_produto_id'] ?? 0)));
 $funis = $pdo->query(
     'SELECT f.*,
             p.nome AS produto_principal_nome, p.valor AS produto_principal_valor, p.tipo AS produto_principal_tipo,
@@ -298,8 +308,8 @@ include '_layout.php';
   <div class="alert alert-<?= htmlspecialchars($msg['tipo']) ?>"><?= htmlspecialchars($msg['texto']) ?></div>
 <?php endif; ?>
 
-<?php if (!$produtos): ?>
-  <div class="alert alert-warning">Nenhum produto ativo foi encontrado. Cadastre planos ou packs em <b>Produtos / Planos</b> antes de criar um funil.</div>
+<?php if (!$produtosPrincipais || !$produtosUpsell): ?>
+  <div class="alert alert-warning">Voce precisa de pelo menos um produto visivel no catalogo e um produto liberado para upsell em <b>Produtos / Planos</b>.</div>
 <?php endif; ?>
 
 <?php if (!$hasWebhookColumns): ?>
@@ -346,7 +356,7 @@ include '_layout.php';
             <label class="form-label" for="produto_principal_id">Produto principal</label>
             <select class="form-control" id="produto_principal_id" name="produto_principal_id" required>
               <option value="0">Selecione o produto principal</option>
-              <?php foreach ($produtos as $produto): ?>
+              <?php foreach ($produtosPrincipais as $produto): ?>
                 <option value="<?= (int) $produto['id'] ?>" <?= (int) $form['produto_principal_id'] === (int) $produto['id'] ? 'selected' : '' ?>>
                   <?= htmlspecialchars(produto_rotulo_bot($produto)) ?>
                 </option>
@@ -358,7 +368,7 @@ include '_layout.php';
             <label class="form-label" for="upsell_produto_id">Produto de upsell</label>
             <select class="form-control" id="upsell_produto_id" name="upsell_produto_id" required>
               <option value="0">Selecione o produto de upsell</option>
-              <?php foreach ($produtos as $produto): ?>
+              <?php foreach ($produtosUpsell as $produto): ?>
                 <option value="<?= (int) $produto['id'] ?>" <?= (int) $form['upsell_produto_id'] === (int) $produto['id'] ? 'selected' : '' ?>>
                   <?= htmlspecialchars(produto_rotulo_bot($produto)) ?>
                 </option>

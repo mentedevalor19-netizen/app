@@ -126,6 +126,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $form['desconto_percentual'] = (float) $form['desconto_percentual'];
         $form['desconto_percentual'] = max(0, min(100, (float) $form['desconto_percentual']));
         $form['desconto_percentual'] = number_format((float) $form['desconto_percentual'], 2, '.', '');
+        $produtoPrincipal = get_produto_por_id($form['produto_principal_id']);
+        $produtoOferta = get_produto_por_id($form['produto_id']);
 
         if ($form['nome'] === '') {
             $msg = ['tipo' => 'danger', 'texto' => 'Informe um nome para o order bump.'];
@@ -135,8 +137,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['tipo' => 'danger', 'texto' => 'Selecione o produto ofertado no order bump.'];
         } elseif ($form['produto_id'] === $form['produto_principal_id']) {
             $msg = ['tipo' => 'danger', 'texto' => 'O produto principal e o produto do order bump precisam ser diferentes.'];
-        } elseif (!get_produto_por_id($form['produto_principal_id']) || !get_produto_por_id($form['produto_id'])) {
+        } elseif (!$produtoPrincipal || !$produtoOferta) {
             $msg = ['tipo' => 'danger', 'texto' => 'Os produtos escolhidos precisam pertencer ao workspace atual.'];
+        } elseif (!produto_mostrar_catalogo($produtoPrincipal)) {
+            $msg = ['tipo' => 'danger', 'texto' => 'O produto principal precisa estar liberado para aparecer no catalogo do bot.'];
+        } elseif (!produto_permite_orderbump($produtoOferta)) {
+            $msg = ['tipo' => 'danger', 'texto' => 'O produto ofertado precisa estar liberado para uso em order bump.'];
         } elseif ($form['media_tipo'] !== 'none' && $form['media_url'] === '') {
             $msg = ['tipo' => 'danger', 'texto' => 'Se escolher uma midia para o order bump, informe a URL publica dela.'];
         } elseif ($form['media_tipo'] !== 'none' && filter_var($form['media_url'], FILTER_VALIDATE_URL) === false) {
@@ -251,7 +257,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$produtos = $pdo->query('SELECT * FROM produtos WHERE ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtos = $pdo->query('SELECT * FROM produtos WHERE ativo = 1 AND ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtosPrincipais = filtrar_produtos_por_contexto($produtos, 'catalogo');
+$produtosOferta = filtrar_produtos_por_contexto($produtos, 'orderbump');
+$produtosPrincipais = adicionar_produto_unico($produtosPrincipais, get_produto_por_id((int) ($form['produto_principal_id'] ?? 0)));
+$produtosOferta = adicionar_produto_unico($produtosOferta, get_produto_por_id((int) ($form['produto_id'] ?? 0)));
 $hasTipoProduto = db_has_column('produtos', 'tipo');
 $hasPackLink = db_has_column('produtos', 'pack_link');
 $orderbumps = $pdo->query(
@@ -278,8 +288,8 @@ include '_layout.php';
   <div class="alert alert-<?= htmlspecialchars($msg['tipo']) ?>"><?= htmlspecialchars($msg['texto']) ?></div>
 <?php endif; ?>
 
-<?php if (!$produtos): ?>
-  <div class="alert alert-warning">Nenhum produto ativo foi encontrado. Cadastre planos ou packs em <b>Produtos / Planos</b> antes de criar um order bump.</div>
+<?php if (!$produtosPrincipais || !$produtosOferta): ?>
+  <div class="alert alert-warning">Voce precisa de pelo menos um produto visivel no catalogo e um produto liberado para order bump em <b>Produtos / Planos</b>.</div>
 <?php endif; ?>
 
 <?php if (!$hasWebhookColumns): ?>
@@ -320,7 +330,7 @@ include '_layout.php';
             <label class="form-label" for="produto_principal_id">Produto principal</label>
             <select class="form-control" id="produto_principal_id" name="produto_principal_id" required>
               <option value="0">Selecione o produto principal</option>
-              <?php foreach ($produtos as $produto): ?>
+              <?php foreach ($produtosPrincipais as $produto): ?>
                 <option value="<?= (int) $produto['id'] ?>" <?= (int) $form['produto_principal_id'] === (int) $produto['id'] ? 'selected' : '' ?>>
                   <?= htmlspecialchars(produto_rotulo_bot($produto)) ?>
                 </option>
@@ -332,7 +342,7 @@ include '_layout.php';
             <label class="form-label" for="produto_id">Produto do order bump</label>
             <select class="form-control" id="produto_id" name="produto_id" required>
               <option value="0">Selecione o produto ofertado</option>
-              <?php foreach ($produtos as $produto): ?>
+              <?php foreach ($produtosOferta as $produto): ?>
                 <option value="<?= (int) $produto['id'] ?>" <?= (int) $form['produto_id'] === (int) $produto['id'] ? 'selected' : '' ?>>
                   <?= htmlspecialchars(produto_rotulo_bot($produto)) ?>
                 </option>

@@ -12,6 +12,7 @@ $msg = null;
 $editingId = (int) ($_GET['editar'] ?? 0);
 $hasTipo = db_has_column('produtos', 'tipo');
 $hasPackLink = db_has_column('produtos', 'pack_link');
+$hasVisibilityControls = produtos_has_visibility_controls();
 $produtoScope = tenant_scope_condition('produtos');
 $pagamentoScope = tenant_scope_condition('pagamentos');
 
@@ -36,6 +37,10 @@ $form = [
     'tipo' => 'grupo',
     'pack_link' => '',
     'ativo' => 1,
+    'mostrar_catalogo' => 1,
+    'permitir_orderbump' => 1,
+    'permitir_upsell' => 1,
+    'permitir_downsell' => 1,
     'ordem' => 0,
 ];
 
@@ -54,6 +59,10 @@ if ($editingId > 0) {
             'tipo' => produto_tipo($editing),
             'pack_link' => produto_pack_link($editing),
             'ativo' => (int) $editing['ativo'],
+            'mostrar_catalogo' => produto_visibility_flag($editing, 'mostrar_catalogo'),
+            'permitir_orderbump' => produto_visibility_flag($editing, 'permitir_orderbump'),
+            'permitir_upsell' => produto_visibility_flag($editing, 'permitir_upsell'),
+            'permitir_downsell' => produto_visibility_flag($editing, 'permitir_downsell'),
             'ordem' => (int) $editing['ordem'],
         ];
     } else {
@@ -75,6 +84,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'tipo' => ((string) ($_POST['tipo'] ?? 'grupo')) === 'pack' ? 'pack' : 'grupo',
             'pack_link' => trim((string) ($_POST['pack_link'] ?? '')),
             'ativo' => isset($_POST['ativo']) ? 1 : 0,
+            'mostrar_catalogo' => isset($_POST['mostrar_catalogo']) ? 1 : 0,
+            'permitir_orderbump' => isset($_POST['permitir_orderbump']) ? 1 : 0,
+            'permitir_upsell' => isset($_POST['permitir_upsell']) ? 1 : 0,
+            'permitir_downsell' => isset($_POST['permitir_downsell']) ? 1 : 0,
             'ordem' => max(0, (int) ($_POST['ordem'] ?? 0)),
         ];
 
@@ -92,75 +105,106 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['tipo' => 'danger', 'texto' => 'Informe o link que sera entregue quando o pack for pago.'];
         } elseif ($form['tipo'] === 'pack' && filter_var($form['pack_link'], FILTER_VALIDATE_URL) === false) {
             $msg = ['tipo' => 'danger', 'texto' => 'O link do pack precisa ser uma URL valida, com http:// ou https://.'];
+        } elseif ($hasVisibilityControls && $form['mostrar_catalogo'] !== 1 && $form['permitir_orderbump'] !== 1 && $form['permitir_upsell'] !== 1 && $form['permitir_downsell'] !== 1) {
+            $msg = ['tipo' => 'danger', 'texto' => 'Escolha pelo menos um lugar onde esse produto pode ser usado.'];
         } else {
             if ($form['id'] > 0) {
-                if ($hasTipo && $hasPackLink) {
-                    $pdo->prepare(
-                        'UPDATE produtos
-                         SET nome = ?, descricao = ?, valor = ?, dias_acesso = ?, tipo = ?, pack_link = ?, ativo = ?, ordem = ?
-                         WHERE id = ? AND ' . $produtoScope
-                    )->execute([
-                        $form['nome'],
-                        $form['descricao'],
-                        (float) $form['valor'],
-                        $form['dias_acesso'],
-                        $form['tipo'],
-                        $form['tipo'] === 'pack' ? $form['pack_link'] : null,
-                        $form['ativo'],
-                        $form['ordem'],
-                        $form['id'],
-                    ]);
-                } else {
-                    $pdo->prepare(
-                        'UPDATE produtos
-                         SET nome = ?, descricao = ?, valor = ?, dias_acesso = ?, ativo = ?, ordem = ?
-                         WHERE id = ? AND ' . $produtoScope
-                    )->execute([
-                        $form['nome'],
-                        $form['descricao'],
-                        (float) $form['valor'],
-                        $form['dias_acesso'],
-                        $form['ativo'],
-                        $form['ordem'],
-                        $form['id'],
-                    ]);
+                $setParts = [
+                    'nome = ?',
+                    'descricao = ?',
+                    'valor = ?',
+                    'dias_acesso = ?',
+                ];
+                $params = [
+                    $form['nome'],
+                    $form['descricao'],
+                    (float) $form['valor'],
+                    $form['dias_acesso'],
+                ];
+
+                if ($hasTipo) {
+                    $setParts[] = 'tipo = ?';
+                    $params[] = $form['tipo'];
                 }
+
+                if ($hasPackLink) {
+                    $setParts[] = 'pack_link = ?';
+                    $params[] = $form['tipo'] === 'pack' ? $form['pack_link'] : null;
+                }
+
+                $setParts[] = 'ativo = ?';
+                $params[] = $form['ativo'];
+
+                if ($hasVisibilityControls) {
+                    $setParts[] = 'mostrar_catalogo = ?';
+                    $setParts[] = 'permitir_orderbump = ?';
+                    $setParts[] = 'permitir_upsell = ?';
+                    $setParts[] = 'permitir_downsell = ?';
+                    $params[] = $form['mostrar_catalogo'];
+                    $params[] = $form['permitir_orderbump'];
+                    $params[] = $form['permitir_upsell'];
+                    $params[] = $form['permitir_downsell'];
+                }
+
+                $setParts[] = 'ordem = ?';
+                $params[] = $form['ordem'];
+                $params[] = $form['id'];
+
+                $pdo->prepare(
+                    'UPDATE produtos
+                     SET ' . implode(', ', $setParts) . '
+                     WHERE id = ? AND ' . $produtoScope
+                )->execute($params);
             } else {
-                if ($hasTipo && $hasPackLink) {
-                    $columns = ['nome', 'descricao', 'valor', 'dias_acesso', 'tipo', 'pack_link', 'ativo', 'ordem'];
-                    $placeholders = ['?', '?', '?', '?', '?', '?', '?', '?'];
-                    $params = [
-                        $form['nome'],
-                        $form['descricao'],
-                        (float) $form['valor'],
-                        $form['dias_acesso'],
-                        $form['tipo'],
-                        $form['tipo'] === 'pack' ? $form['pack_link'] : null,
-                        $form['ativo'],
-                        $form['ordem'],
-                    ];
-                    tenant_insert_append('produtos', $columns, $placeholders, $params);
-                    $pdo->prepare(
-                        'INSERT INTO produtos (' . implode(', ', $columns) . ')
-                         VALUES (' . implode(', ', $placeholders) . ')'
-                    )->execute($params);
-                } else {
-                    $columns = ['nome', 'descricao', 'valor', 'dias_acesso', 'ativo', 'ordem'];
-                    $placeholders = ['?', '?', '?', '?', '?', '?'];
-                    $params = [
-                        $form['nome'],
-                        $form['descricao'],
-                        (float) $form['valor'],
-                        $form['dias_acesso'],
-                        $form['ativo'],
-                        $form['ordem'],
-                    ];
-                    tenant_insert_append('produtos', $columns, $placeholders, $params);
-                    $pdo->prepare(
-                        'INSERT INTO produtos (' . implode(', ', $columns) . ')
-                         VALUES (' . implode(', ', $placeholders) . ')'
-                    )->execute($params);
+                $columns = ['nome', 'descricao', 'valor', 'dias_acesso'];
+                $placeholders = ['?', '?', '?', '?'];
+                $params = [
+                    $form['nome'],
+                    $form['descricao'],
+                    (float) $form['valor'],
+                    $form['dias_acesso'],
+                ];
+
+                if ($hasTipo) {
+                    $columns[] = 'tipo';
+                    $placeholders[] = '?';
+                    $params[] = $form['tipo'];
                 }
+
+                if ($hasPackLink) {
+                    $columns[] = 'pack_link';
+                    $placeholders[] = '?';
+                    $params[] = $form['tipo'] === 'pack' ? $form['pack_link'] : null;
+                }
+
+                $columns[] = 'ativo';
+                $placeholders[] = '?';
+                $params[] = $form['ativo'];
+
+                if ($hasVisibilityControls) {
+                    $columns[] = 'mostrar_catalogo';
+                    $columns[] = 'permitir_orderbump';
+                    $columns[] = 'permitir_upsell';
+                    $columns[] = 'permitir_downsell';
+                    $placeholders[] = '?';
+                    $placeholders[] = '?';
+                    $placeholders[] = '?';
+                    $placeholders[] = '?';
+                    $params[] = $form['mostrar_catalogo'];
+                    $params[] = $form['permitir_orderbump'];
+                    $params[] = $form['permitir_upsell'];
+                    $params[] = $form['permitir_downsell'];
+                }
+
+                $columns[] = 'ordem';
+                $placeholders[] = '?';
+                $params[] = $form['ordem'];
+
+                tenant_insert_append('produtos', $columns, $placeholders, $params);
+                $pdo->prepare(
+                    'INSERT INTO produtos (' . implode(', ', $columns) . ')
+                     VALUES (' . implode(', ', $placeholders) . ')'
+                )->execute($params);
             }
 
             header('Location: ' . admin_url('produtos.php?ok=salvo'));
@@ -211,6 +255,10 @@ include '_layout.php';
 
 <?php if (!$hasTipo || !$hasPackLink): ?>
   <div class="alert alert-warning">O banco ainda nao tem as colunas de packs. Execute o SQL atualizado para liberar a venda por link no bot.</div>
+<?php endif; ?>
+
+<?php if (!$hasVisibilityControls): ?>
+  <div class="alert alert-warning">O banco ainda nao tem os controles de visibilidade por oferta. Rode a migration nova para criar produtos exclusivos de catalogo, order bump, upsell ou downsell.</div>
 <?php endif; ?>
 
 <div class="content-grid content-grid--sidebar">
@@ -283,6 +331,29 @@ include '_layout.php';
           </label>
         </div>
 
+        <div class="form-group">
+          <label class="form-label">Onde esse produto pode aparecer</label>
+          <div class="stack" style="gap: 10px;">
+            <label class="checkbox-row">
+              <input type="checkbox" name="mostrar_catalogo" <?= (int) $form['mostrar_catalogo'] === 1 ? 'checked' : '' ?>>
+              <span>Mostrar no catalogo principal do bot</span>
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" name="permitir_orderbump" <?= (int) $form['permitir_orderbump'] === 1 ? 'checked' : '' ?>>
+              <span>Permitir como produto de order bump</span>
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" name="permitir_upsell" <?= (int) $form['permitir_upsell'] === 1 ? 'checked' : '' ?>>
+              <span>Permitir como produto de upsell</span>
+            </label>
+            <label class="checkbox-row">
+              <input type="checkbox" name="permitir_downsell" <?= (int) $form['permitir_downsell'] === 1 ? 'checked' : '' ?>>
+              <span>Permitir como produto de downsell</span>
+            </label>
+          </div>
+          <span class="form-help">Assim voce pode esconder um produto do menu principal e deixar ele disponivel apenas nas ofertas internas.</span>
+        </div>
+
         <div class="form-actions">
           <button type="submit" class="btn btn-primary"><?= $form['id'] > 0 ? 'Salvar alteracoes' : 'Criar produto' ?></button>
           <?php if ($form['id'] > 0): ?>
@@ -310,6 +381,7 @@ include '_layout.php';
               <th>Tipo</th>
               <th>Valor</th>
               <th>Entrega</th>
+              <th>Uso</th>
               <th>Ordem</th>
               <th>Status</th>
               <th>Acoes</th>
@@ -318,7 +390,7 @@ include '_layout.php';
           <tbody>
             <?php if (!$produtos): ?>
               <tr>
-                <td colspan="8" class="empty-state">Nenhum produto cadastrado ainda.</td>
+                <td colspan="9" class="empty-state">Nenhum produto cadastrado ainda.</td>
               </tr>
             <?php endif; ?>
 
@@ -345,6 +417,24 @@ include '_layout.php';
                   <?php else: ?>
                     <?= (int) ($produto['dias_acesso'] ?? 0) ?> dias no grupo
                   <?php endif; ?>
+                </td>
+                <td>
+                  <?php
+                    $uso = [];
+                    if (produto_mostrar_catalogo($produto)) {
+                        $uso[] = 'Catalogo';
+                    }
+                    if (produto_permite_orderbump($produto)) {
+                        $uso[] = 'Order bump';
+                    }
+                    if (produto_permite_upsell($produto)) {
+                        $uso[] = 'Upsell';
+                    }
+                    if (produto_permite_downsell($produto)) {
+                        $uso[] = 'Downsell';
+                    }
+                  ?>
+                  <?= $uso ? htmlspecialchars(implode(' / ', $uso)) : 'Sem uso liberado' ?>
                 </td>
                 <td class="mono"><?= (int) $produto['ordem'] ?></td>
                 <td>

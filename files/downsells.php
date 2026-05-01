@@ -123,6 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $form['desconto_percentual'] = (float) $form['desconto_percentual'];
         $form['desconto_percentual'] = max(0, min(100, (float) $form['desconto_percentual']));
         $form['desconto_percentual'] = number_format((float) $form['desconto_percentual'], 2, '.', '');
+        $downsellProduto = get_produto_por_id($form['produto_id']);
 
         if ($form['nome'] === '') {
             $msg = ['tipo' => 'danger', 'texto' => 'Informe um nome para o downsell.'];
@@ -130,8 +131,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['tipo' => 'danger', 'texto' => 'Selecione o upsell de origem deste downsell.'];
         } elseif ($form['produto_id'] <= 0) {
             $msg = ['tipo' => 'danger', 'texto' => 'Selecione o produto ofertado no downsell.'];
-        } elseif (!get_funil_por_id($form['funil_id']) || !get_produto_por_id($form['produto_id'])) {
+        } elseif (!get_funil_por_id($form['funil_id']) || !$downsellProduto) {
             $msg = ['tipo' => 'danger', 'texto' => 'Funil e produto precisam pertencer ao workspace atual.'];
+        } elseif (!produto_permite_downsell($downsellProduto)) {
+            $msg = ['tipo' => 'danger', 'texto' => 'O produto ofertado precisa estar liberado para uso em downsell.'];
         } elseif ($form['media_tipo'] !== 'none' && $form['media_url'] === '') {
             $msg = ['tipo' => 'danger', 'texto' => 'Se escolher uma midia para o downsell, informe a URL publica dela.'];
         } elseif ($form['media_tipo'] !== 'none' && filter_var($form['media_url'], FILTER_VALIDATE_URL) === false) {
@@ -252,7 +255,9 @@ $funis = $pdo->query(
      WHERE ' . $funilListScope . '
      ORDER BY ' . db_order_by_clause('funis', 'f')
 )->fetchAll();
-$produtos = $pdo->query('SELECT * FROM produtos WHERE ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtos = $pdo->query('SELECT * FROM produtos WHERE ativo = 1 AND ' . $produtoScope . ' ORDER BY ' . db_order_by_clause('produtos'))->fetchAll();
+$produtosDownsell = filtrar_produtos_por_contexto($produtos, 'downsell');
+$produtosDownsell = adicionar_produto_unico($produtosDownsell, get_produto_por_id((int) ($form['produto_id'] ?? 0)));
 $downsells = $pdo->query(
     'SELECT d.*, f.nome AS funil_nome, p.nome AS produto_nome, p.valor AS produto_valor
      FROM downsells d
@@ -276,8 +281,8 @@ include '_layout.php';
   <div class="alert alert-warning">Nenhum upsell foi encontrado. Cadastre pelo menos um funil em <b>Upsell</b> antes de criar downsells.</div>
 <?php endif; ?>
 
-<?php if (!$produtos): ?>
-  <div class="alert alert-warning">Nenhum produto ativo foi encontrado. Cadastre planos ou packs em <b>Produtos / Planos</b> antes de criar um downsell.</div>
+<?php if (!$produtosDownsell): ?>
+  <div class="alert alert-warning">Nenhum produto liberado para downsell foi encontrado. Ajuste isso em <b>Produtos / Planos</b>.</div>
 <?php endif; ?>
 
 <?php if (!$hasWebhookColumns): ?>
@@ -334,7 +339,7 @@ include '_layout.php';
             <label class="form-label" for="produto_id">Produto do downsell</label>
             <select class="form-control" id="produto_id" name="produto_id" required>
               <option value="0">Selecione o produto ofertado</option>
-              <?php foreach ($produtos as $produto): ?>
+              <?php foreach ($produtosDownsell as $produto): ?>
                 <option value="<?= (int) $produto['id'] ?>" <?= (int) $form['produto_id'] === (int) $produto['id'] ? 'selected' : '' ?>>
                   <?= htmlspecialchars(produto_rotulo_bot($produto)) ?>
                 </option>
